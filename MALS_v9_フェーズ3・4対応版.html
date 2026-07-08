@@ -1,0 +1,2685 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math Adaptive Learning System (MALS) v9.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+    <!-- フェーズ4：PDF/Wordからのテキスト抽出用（抽出後は正規表現ベースの簡易パーサで問題候補化） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.7.0/mammoth.browser.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Urbanist', 'Noto Sans JP', sans-serif;
+            background-color: #f8fafc;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <header id="app-header" class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-600 text-white p-2 rounded-xl shadow-md shadow-indigo-100">
+                    <i class="fa-solid fa-graduation-cap text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold text-slate-900 tracking-tight">MALS</h1>
+                    <p class="text-[10px] text-slate-400 font-medium">Math Adaptive Learning System v9.0（フェーズ3・4対応版）</p>
+                </div>
+            </div>
+            
+            <nav class="flex p-1 bg-slate-100 rounded-xl overflow-x-auto max-w-full md:max-w-auto">
+                <button id="btn-teacher-dash-tab" onclick="attemptSwitchTab('teacher-dash-tab')" class="tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-700 transition-all">
+                    <i class="fa-solid fa-lock mr-1.5 text-[10px]"></i><i class="fa-solid fa-chart-pie mr-1.5"></i>ダッシュボード
+                </button>
+                <button id="btn-content-mgt-tab" onclick="attemptSwitchTab('content-mgt-tab')" class="tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-700 transition-all">
+                    <i class="fa-solid fa-lock mr-1.5 text-[10px]"></i><i class="fa-solid fa-folder-tree mr-1.5"></i>単元・問題
+                </button>
+                <button id="btn-class-mgt-tab" onclick="attemptSwitchTab('class-mgt-tab')" class="tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-700 transition-all">
+                    <i class="fa-solid fa-lock mr-1.5 text-[10px]"></i><i class="fa-solid fa-school mr-1.5"></i>クラス管理
+                </button>
+                <button id="btn-student-view-tab" onclick="switchTab('student-view-tab')" class="tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg bg-white text-indigo-700 shadow-sm transition-all">
+                    <i class="fa-solid fa-user-graduate mr-1.5"></i>生徒ビュー
+                </button>
+            </nav>
+
+            <button id="btn-relock-admin" onclick="relockAdmin()" class="hidden ml-2 px-3 py-2 text-xs font-bold text-slate-400 hover:text-rose-600 transition-all whitespace-nowrap" title="管理者ロックをかけ直して生徒に端末を渡す">
+                <i class="fa-solid fa-lock mr-1"></i>再ロック
+            </button>
+        </div>
+    </header>
+
+    <div id="class-context-bar" class="bg-indigo-50 border-b border-indigo-100">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="flex items-center gap-2 min-w-0">
+                <i class="fa-solid fa-school text-indigo-500 shrink-0"></i>
+                <span class="font-bold text-indigo-900 shrink-0">現在のクラス（テナント）:</span>
+                <select id="class-context-select" onchange="handleClassContextChange(this.value)" class="px-2 py-1 border border-indigo-200 rounded-lg bg-white text-indigo-800 font-bold text-xs max-w-[220px] truncate">
+                    <option value="">クラス未選択</option>
+                </select>
+            </div>
+            <p class="text-[10px] text-indigo-400">クラスごとに生徒・問題・進捗データが分離されます（フェーズ3：マルチテナント化）</p>
+        </div>
+    </div>
+
+    <div id="admin-lock-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-base"><i class="fa-solid fa-lock"></i></div>
+                <div>
+                    <h3 id="admin-lock-title" class="text-sm font-bold text-slate-900">管理者ロック</h3>
+                    <p id="admin-lock-subtitle" class="text-[11px] text-slate-400 mt-0.5">教員向け機能へのアクセスには認証が必要です。</p>
+                </div>
+            </div>
+
+            <div id="admin-lock-body" class="space-y-3 text-left"></div>
+
+            <p id="admin-lock-error" class="hidden text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></p>
+
+            <div class="flex gap-2 pt-1">
+                <button onclick="closeAdminLockModal()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-all">キャンセル</button>
+                <button id="admin-lock-submit-btn" onclick="handleAdminLockSubmit()" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all">解除する</button>
+            </div>
+            <p class="text-[10px] text-slate-300 text-center leading-relaxed">
+                <i class="fa-solid fa-circle-info mr-1"></i>解除状態はこのブラウザタブを閉じるまでのセッション限り有効です。
+            </p>
+        </div>
+    </div>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <section id="teacher-dash-tab" class="tab-content space-y-6">
+            <div id="firebase-setup-zone" class="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-4">
+                <div class="flex items-start gap-3">
+                    <div class="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5"><i class="fa-solid fa-cloud"></i></div>
+                    <div>
+                        <h3 class="text-xs font-bold text-amber-900">Firebase リアルタイム同期システム</h3>
+                        <p class="text-[11px] text-amber-700 mt-0.5">多端末での同期を行う場合は、下記の項目をFirebase Consoleの値でひとつずつ入力してください（未設定時はブラウザのローカルストレージのみで動作します）。</p>
+                    </div>
+                </div>
+
+                <div class="bg-white/70 border border-amber-200 rounded-xl">
+                    <button onclick="toggleFirebaseSetupGuide()" class="w-full flex items-center justify-between px-3.5 py-2.5 text-left">
+                        <span class="text-[11px] font-bold text-amber-800"><i class="fa-solid fa-circle-question mr-1.5"></i>はじめての方向け：設定値の探し方</span>
+                        <i id="firebase-guide-toggle-icon" class="fa-solid fa-chevron-down text-[10px] text-amber-500"></i>
+                    </button>
+                    <div id="firebase-setup-guide-body" class="px-3.5 pb-3.5 space-y-1.5">
+                        <ol class="text-[11px] text-amber-800 leading-relaxed list-decimal list-inside space-y-1">
+                            <li>Firebase Console（<span class="font-mono">console.firebase.google.com</span>）でプロジェクトを開く</li>
+                            <li>左上の歯車アイコン（<i class="fa-solid fa-gear"></i>）から「プロジェクトの設定」を開く</li>
+                            <li>「全般」タブ内の「マイアプリ」で、ウェブアプリ（&lt;/&gt;アイコン）の「SDK の設定と構成」を開く</li>
+                            <li>表示されたコードの中の値を、下の各項目にひとつずつコピーする（下の自動入力欄に丸ごと貼り付けてもOK）</li>
+                            <li>データベースURLだけは「構築」メニューの「Realtime Database」画面の上部に表示されるURLを使う（Firestoreの画面ではないので注意）</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="bg-white/70 border border-amber-200 rounded-xl p-3.5 space-y-2">
+                    <p class="text-[11px] font-bold text-amber-800"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>時短：SDKコードを丸ごと貼り付けて自動入力</p>
+                    <p class="text-[10px] text-amber-600">Firebase Consoleに表示される <span class="font-mono">const firebaseConfig = {'{'} ... {'}'}</span> のコードブロックをそのまま貼り付けると、下の各項目に自動で振り分けます。</p>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <textarea id="fb-paste-autofill" rows="2" placeholder="const firebaseConfig = { apiKey: &quot;...&quot;, authDomain: &quot;...&quot;, ... };" class="flex-1 px-3 py-2 text-[11px] font-mono border border-amber-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
+                        <button onclick="autoFillFirebaseConfigFromPaste()" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-[11px] whitespace-nowrap shadow-sm transition-all self-start">自動入力する</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="space-y-1" data-fb-field="apiKey">
+                        <label class="block text-[10px] font-bold text-amber-800">apiKey <span class="text-rose-500">必須</span></label>
+                        <input type="password" id="fb-apiKey" placeholder="AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" class="w-full px-3 py-1.5 border border-amber-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-amber-500">SDK設定内の apiKey の値</p>
+                    </div>
+                    <div class="space-y-1" data-fb-field="authDomain">
+                        <label class="block text-[10px] font-bold text-amber-800">authDomain <span class="text-rose-500">必須</span></label>
+                        <input type="text" id="fb-authDomain" placeholder="your-project.firebaseapp.com" class="w-full px-3 py-1.5 border border-amber-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-amber-500">SDK設定内の authDomain の値</p>
+                    </div>
+                    <div class="space-y-1 sm:col-span-2" data-fb-field="databaseURL">
+                        <label class="block text-[10px] font-bold text-amber-800">databaseURL <span class="text-rose-500">必須</span></label>
+                        <input type="text" id="fb-databaseURL" placeholder="https://your-project-default-rtdb.firebaseio.com" class="w-full px-3 py-1.5 border border-amber-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-amber-500">「Realtime Database」画面上部に表示されるURL（Firestoreとは別物）</p>
+                    </div>
+                    <div class="space-y-1" data-fb-field="projectId">
+                        <label class="block text-[10px] font-bold text-amber-800">projectId <span class="text-rose-500">必須</span></label>
+                        <input type="text" id="fb-projectId" placeholder="your-project-id" class="w-full px-3 py-1.5 border border-amber-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-amber-500">SDK設定内の projectId の値</p>
+                    </div>
+                    <div class="space-y-1" data-fb-field="appId">
+                        <label class="block text-[10px] font-bold text-amber-800">appId <span class="text-rose-500">必須</span></label>
+                        <input type="text" id="fb-appId" placeholder="1:1234567890:web:abcdef123456" class="w-full px-3 py-1.5 border border-amber-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-amber-500">SDK設定内の appId の値</p>
+                    </div>
+                    <div class="space-y-1" data-fb-field="storageBucket">
+                        <label class="block text-[10px] font-bold text-slate-500">storageBucket <span class="text-slate-400">任意</span></label>
+                        <input type="text" id="fb-storageBucket" placeholder="your-project.appspot.com" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-slate-400">未入力でも同期機能自体は動作します</p>
+                    </div>
+                    <div class="space-y-1" data-fb-field="messagingSenderId">
+                        <label class="block text-[10px] font-bold text-slate-500">messagingSenderId <span class="text-slate-400">任意</span></label>
+                        <input type="text" id="fb-messagingSenderId" placeholder="1234567890" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                        <p class="text-[9px] text-slate-400">未入力でも同期機能自体は動作します</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 pt-1">
+                    <button onclick="initializeFirebaseConnection()" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs whitespace-nowrap shadow-sm transition-all"><i class="fa-solid fa-plug mr-1.5"></i>接続・保存</button>
+                    <button onclick="clearFirebaseConfigFields()" class="px-3 py-2 text-[11px] font-bold text-amber-600 hover:text-amber-800 transition-all">入力内容をクリア</button>
+                </div>
+            </div>
+
+            <div id="security-rules-guide" class="bg-slate-900 rounded-2xl p-4 flex flex-col md:flex-row items-start gap-4">
+                <div class="p-2 bg-slate-800 text-emerald-400 rounded-xl mt-0.5"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="flex-1 min-w-0 space-y-2">
+                    <h3 class="text-xs font-bold text-white">【フェーズ1】Firebase セキュリティルール設定ガイド</h3>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">
+                        このアプリの「管理者ロック」はクライアント側のUIガードであり、Firebase Realtime Database 自体への不正な読み書きを防ぐものではありません。
+                        本番運用する場合は、必ず Firebase Console の「Realtime Database &gt; ルール」で下記のようなアクセス制御を設定してください（未設定のままだと誰でもデータベースを閲覧・書き換えできる状態になります）。
+                    </p>
+                    <pre id="security-rules-json" class="bg-slate-950 text-emerald-300 text-[10px] leading-relaxed rounded-xl p-3 overflow-x-auto"><code>{
+  "rules": {
+    "mals_v6_system": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}</code></pre>
+                    <div class="flex items-center gap-2">
+                        <button onclick="copySecurityRulesJson()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px] shadow-sm transition-all"><i class="fa-solid fa-copy mr-1"></i>ルールJSONをコピー</button>
+                        <span id="security-rules-copy-feedback" class="text-[10px] text-emerald-400 font-bold hidden"><i class="fa-solid fa-circle-check mr-1"></i>コピーしました</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 leading-relaxed">
+                        <i class="fa-solid fa-circle-info mr-1"></i>上記ルールは Firebase Authentication の導入を前提としています。認証基盤を未導入のまま厳格化したい場合は、一時的に固定のシークレットキーを条件式に組み込む方法もありますが、恒久対応としては Firebase Authentication への移行を推奨します（本仕様書フェーズ3で計画）。
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div><p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">登録生徒数</p><h3 id="dash-student-count" class="text-2xl font-bold text-slate-800 mt-1">0 名</h3></div>
+                    <div class="p-3 bg-blue-50 text-blue-600 rounded-xl text-lg"><i class="fa-solid fa-users"></i></div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div><p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">総登録問題数</p><h3 id="dash-problem-count" class="text-2xl font-bold text-slate-800 mt-1">0 問</h3></div>
+                    <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl text-lg"><i class="fa-solid fa-book-open"></i></div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div><p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">クラウド同期状態</p><h3 id="dash-sync-status" class="text-sm font-bold text-slate-500 mt-2"><i class="fa-solid fa-circle-dot text-slate-300 mr-1.5"></i>ローカルモード</h3></div>
+                    <div id="dash-sync-icon" class="p-3 bg-slate-50 text-slate-400 rounded-xl text-lg"><i class="fa-solid fa-database"></i></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+                    <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-rose-500"></i>【フェーズ2】つまずき検出アラート</h2>
+                    <p class="text-[11px] text-slate-400 mt-0.5">平均習熟度が低い、または直近2問連続で誤答している生徒がいる小単元を自動抽出します（上位3件）。</p>
+                </div>
+                <div id="struggle-detection-container" class="p-6 space-y-2.5"></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-th text-indigo-500"></i>生徒理解度マトリクス ＆ 学級ヒートマップ</h2>
+                        <p class="text-[11px] text-slate-400 mt-0.5">小単元ごとの現在の実力推定レベルおよび正答状況をマトリクス構造でリアルタイムに俯瞰します。矢印は直近の理解度の傾向（フェーズ2）を示します。</p>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div id="heatmap-container" class="w-full"></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-id-card text-emerald-500"></i>生徒名簿マネージャー</h2>
+                        <p class="text-[11px] text-slate-400 mt-0.5">出席番号、名前、ログイン時のパスワードを設定して管理します。パスワードはハッシュ化して保存されるため、登録後に確認・表示することはできません（必ずこの場で生徒本人に伝えてください）。</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                        <input type="number" id="new-student-num" placeholder="出席番号" class="w-20 px-3 py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" min="1">
+                        <input type="text" id="new-student-name" placeholder="生徒の氏名" class="px-3 py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                        <input type="text" id="new-student-pass" placeholder="初期パスワード" class="px-3 py-1.5 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                        <button onclick="registerNewStudentAccount()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i>追加</button>
+                    </div>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div id="students-grid-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3"></div>
+
+                    <div class="border-t border-slate-100 pt-4">
+                        <button onclick="toggleStudentArchivePanel()" class="text-[11px] font-bold text-slate-400 hover:text-slate-600 transition-all">
+                            <i id="student-archive-toggle-icon" class="fa-solid fa-chevron-right mr-1.5 text-[9px]"></i>アーカイブ済みの生徒を表示
+                        </button>
+                        <div id="students-archive-list" class="hidden grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="content-mgt-tab" class="tab-content space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 lg:col-span-1">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-900"><i class="fa-solid fa-folder-tree text-indigo-500 mr-1.5"></i>単元・小単元のカリキュラム設定</h2>
+                        <p class="text-[11px] text-slate-400 mt-0.5">大単元を作成し、その中に紐づく小単元を自在に構成・削除できます。</p>
+                    </div>
+                    
+                    <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 space-y-2">
+                        <p class="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><i class="fa-solid fa-folder-plus text-amber-500"></i>新規大単元の追加</p>
+                        <div class="flex gap-2">
+                            <input type="text" id="root-category-name-input" placeholder="例: 数学I：数と式" class="flex-1 px-3 py-1.5 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <button onclick="executeRootCategoryRegistration()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-950 text-white font-bold rounded-xl text-xs shadow-sm transition-all">作成</button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <p class="text-[11px] font-bold text-slate-500">現在のカリキュラム構造（自由に追加・アーカイブ）</p>
+                        <div id="category-curriculum-manager" class="space-y-3 max-h-[400px] overflow-y-auto pr-1"></div>
+                    </div>
+
+                    <div class="border-t border-slate-100 pt-3">
+                        <button onclick="toggleCategoryArchivePanel()" class="text-[11px] font-bold text-slate-400 hover:text-slate-600 transition-all">
+                            <i id="category-archive-toggle-icon" class="fa-solid fa-chevron-right mr-1.5 text-[9px]"></i>アーカイブ済みの単元を表示
+                        </button>
+                        <div id="category-archive-manager" class="hidden space-y-2 mt-3 max-h-[300px] overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 lg:col-span-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-900"><i class="fa-solid fa-file-pen text-emerald-500 mr-1.5"></i>アダプティブ問題エディタ</h2>
+                        <p class="text-[11px] text-slate-400 mt-0.5">KaTeX記述（$数式$）に対応。レベル別の問題をプールに補填します。</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400">所属小単元カテゴリ（必須）</label>
+                            <select id="problem-category-select" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"></select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400">問題難易度レベル設定</label>
+                            <select id="problem-level-select" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="1">レベル 1（基礎・定義の確認）</option>
+                                <option value="2">レベル 2（標準・典型問題）</option>
+                                <option value="3">レベル 3（応用・発展初歩）</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400">【フェーズ4】出題形式</label>
+                            <select id="problem-type-select" onchange="toggleProblemTypeFields(this.value)" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option value="choice">4択選択式</option>
+                                <option value="numeric">数値解答式</option>
+                                <option value="expression">途中式・記述式</option>
+                                <option value="drawing">図形描画（自己採点）</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-400">問題文本文（数式は $ \sin\theta $ のようにドル記号で囲んでください）</label>
+                        <textarea id="problem-question-input" rows="3" placeholder="直角三角形において、角度 $\theta$ のとき『対辺 / 斜辺』で表される三角比はどれか？" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                    </div>
+
+                    <!-- 4択選択式（既存） -->
+                    <div id="problem-type-fields-choice" class="space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="space-y-1"><label class="text-[10px] font-bold text-indigo-600">選択肢 1</label><input type="text" id="choice-0" placeholder="$\sin \theta$" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                            <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500">選択肢 2</label><input type="text" id="choice-1" placeholder="$\cos \theta$" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                            <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500">選択肢 3</label><input type="text" id="choice-2" placeholder="$\tan \theta$" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                            <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500">選択肢 4</label><input type="text" id="choice-3" placeholder="定義できない" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400">正解インデックス</label>
+                            <select id="problem-correct-select" class="px-3 py-1 text-xs border border-slate-300 rounded-xl bg-white">
+                                <option value="0">選択肢 1 が正解</option>
+                                <option value="1">選択肢 2 が正解</option>
+                                <option value="2">選択肢 3 が正解</option>
+                                <option value="3">選択肢 4 が正解</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 数値解答式（フェーズ4） -->
+                    <div id="problem-type-fields-numeric" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="space-y-1"><label class="text-[10px] font-bold text-indigo-600">正解の数値</label><input type="text" id="numeric-answer-input" placeholder="例：0.5 または 1/2" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                        <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500">許容誤差（任意・空欄なら完全一致）</label><input type="text" id="numeric-tolerance-input" placeholder="例：0.01" class="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"></div>
+                    </div>
+
+                    <!-- 途中式・記述式（フェーズ4） -->
+                    <div id="problem-type-fields-expression" class="hidden space-y-1">
+                        <label class="text-[10px] font-bold text-indigo-600">正解として許容する記述（複数可・改行区切り）</label>
+                        <textarea id="expression-answers-input" rows="2" placeholder="例：&#10;sin^2θ+cos^2θ=1&#10;sin²θ+cos²θ=1" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"></textarea>
+                        <p class="text-[9px] text-slate-400">空白・全角半角の違いを無視して判定します。表記ゆれが多い場合は複数行に列挙してください。</p>
+                    </div>
+
+                    <!-- 図形描画：自動採点はできないため自己採点方式（フェーズ4） -->
+                    <div id="problem-type-fields-drawing" class="hidden space-y-1">
+                        <label class="text-[10px] font-bold text-indigo-600">模範解答の説明・採点基準（生徒の自己採点用に表示）</label>
+                        <textarea id="drawing-answer-hint-input" rows="2" placeholder="例：斜辺5・対辺3・隣辺4の直角三角形を正しい比率で描けていれば正解" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"></textarea>
+                        <p class="text-[9px] text-slate-400">図形描画問題は自動採点ができないため、生徒がキャンバスに描画→模範解答を確認→自己申告で正誤を記録する方式です。</p>
+                    </div>
+
+                    <div class="flex items-center justify-end pt-2">
+                        <button onclick="executeManualProblemAddition()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all"><i class="fa-solid fa-plus mr-1"></i>この問題をプールに追加</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-file-csv text-blue-500"></i>CSV問題データ一括インポート（Firebase自動同期）
+                    </h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">外部で作成した問題バリエーションCSVファイルを選択し、クラウドおよびインメモリへ一括追加します。</p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+                    <div class="space-y-1.5">
+                        <p class="text-[11px] font-bold text-indigo-700">【推奨CSVフォーマット（1行目はヘッダー行としてスキップされます）】</p>
+                        <p class="text-[10px] text-slate-500 leading-relaxed font-mono">
+                            小単元ID, 難易度レベル(1〜3), 問題本文, 選択肢1, 選択肢2, 選択肢3, 選択肢4, 正解インデックス(0〜3)<br>
+                            ※数式内にカンマ（,）が含まれる場合は、セル全体を半角ダブルクォーテーション <code class="bg-slate-200 px-1 rounded">"</code> で囲んで出力してください。
+                        </p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2 justify-end">
+                        <label class="cursor-pointer inline-flex items-center justify-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all whitespace-nowrap">
+                            <i class="fa-solid fa-upload mr-1.5"></i>CSVファイルを選択してインポート
+                            <input type="file" id="csv-file-input" accept=".csv" onchange="executeCSVImport(event)" class="hidden">
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900"><i class="fa-solid fa-database text-slate-500 mr-1.5"></i>登録問題バリエーション・プール一覧</h3>
+                        <p class="text-[11px] text-slate-400 mt-0.5">小単元×難易度レベル別に現在何問の問題が登録されているかを俯瞰します。</p>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div id="problems-matrix-preview-container"></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+                    <h3 class="text-sm font-bold text-slate-900"><i class="fa-solid fa-people-arrows text-violet-500 mr-1.5"></i>【フェーズ3】共有問題テンプレート（教員間シェア）</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">小単元とその配下の問題を「テンプレート」として書き出すと、他のクラスを担当する教員も同じFirebaseプロジェクト上でインポートして再利用できます。</p>
+                </div>
+                <div class="p-6 space-y-5">
+                    <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-violet-50 border border-violet-200 rounded-xl p-3.5">
+                        <select id="template-export-category-select" class="flex-1 px-3 py-1.5 text-xs border border-violet-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"></select>
+                        <input type="text" id="template-export-name-input" placeholder="テンプレート名（例：三角比 基礎ドリル）" class="flex-1 px-3 py-1.5 text-xs border border-violet-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-violet-500">
+                        <button onclick="exportCategoryAsTemplate()" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-xs whitespace-nowrap shadow-sm transition-all"><i class="fa-solid fa-share-from-square mr-1.5"></i>共有ライブラリへ登録</button>
+                    </div>
+
+                    <div class="space-y-2">
+                        <p class="text-[11px] font-bold text-slate-500">共有ライブラリ一覧（全クラス共通・登録した教員・クラス名を表示）</p>
+                        <div id="shared-template-library-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+                    <h3 class="text-sm font-bold text-slate-900"><i class="fa-solid fa-file-import text-sky-500 mr-1.5"></i>【フェーズ4】PDF / Word からの問題自動抽出インポート（ベータ）</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                        既存のプリントやWord問題集からテキストを抽出し、パターンに一致する箇所を問題候補として自動検出します。抽出はブラウザ内で完結し、外部サーバーには送信されません。<br>
+                        <span class="font-bold text-sky-600">対応フォーマットの目安：</span>「問1．」「(1)」などの通し番号＋本文、「①②③④」または「1.2.3.4.」形式の選択肢、「正解：②」のような解答表記。書式が異なる場合は検出精度が下がるため、必ずインポート前のプレビューで内容を確認・修正してください。
+                    </p>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                        <input type="file" id="doc-import-file-input" accept=".pdf,.docx" class="flex-1 text-xs border border-slate-300 rounded-xl px-3 py-2 bg-white file:mr-3 file:px-3 file:py-1 file:rounded-lg file:border-0 file:bg-sky-600 file:text-white file:font-bold file:text-xs">
+                        <select id="doc-import-category-select" class="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"></select>
+                        <select id="doc-import-level-select" class="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-sky-500">
+                            <option value="1">Level 1</option>
+                            <option value="2">Level 2</option>
+                            <option value="3">Level 3</option>
+                        </select>
+                        <button onclick="extractProblemsFromDocument()" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs whitespace-nowrap shadow-sm transition-all"><i class="fa-solid fa-magnifying-glass mr-1.5"></i>テキストを抽出・解析</button>
+                    </div>
+                    <p id="doc-import-status" class="text-[11px] text-slate-400"></p>
+                    <div id="doc-import-preview-container" class="space-y-2"></div>
+                    <div id="doc-import-commit-zone" class="hidden flex justify-end">
+                        <button onclick="commitExtractedProblems()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all"><i class="fa-solid fa-check mr-1.5"></i>プレビュー内容を問題プールへ一括登録</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="class-mgt-tab" class="tab-content space-y-6">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+                    <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-school text-indigo-500"></i>【フェーズ3】クラス（テナント）管理</h2>
+                    <p class="text-[11px] text-slate-400 mt-0.5">学校やクラス単位でデータを分離できます。クラスごとに生徒名簿・カリキュラム・問題プール・学習進捗が独立して保存されます。</p>
+                </div>
+                <div class="p-6 space-y-5">
+                    <div class="flex flex-col sm:flex-row gap-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3.5">
+                        <input type="text" id="new-class-name-input" placeholder="新しいクラス名（例：3年A組 数学I）" class="flex-1 px-3 py-1.5 text-xs border border-indigo-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button onclick="createNewClass()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs whitespace-nowrap shadow-sm transition-all"><i class="fa-solid fa-plus mr-1.5"></i>クラスを作成</button>
+                    </div>
+
+                    <div class="space-y-2">
+                        <p class="text-[11px] font-bold text-slate-500">稼働中のクラス一覧</p>
+                        <div id="class-management-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                    </div>
+
+                    <div class="border-t border-slate-100 pt-4">
+                        <button onclick="toggleClassArchivePanel()" class="text-[11px] font-bold text-slate-400 hover:text-slate-600 transition-all">
+                            <i id="class-archive-toggle-icon" class="fa-solid fa-chevron-right mr-1.5 text-[9px]"></i>アーカイブ済みのクラスを表示
+                        </button>
+                        <div id="class-archive-list" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3"></div>
+                    </div>
+
+                    <p class="text-[10px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
+                        <i class="fa-solid fa-circle-info mr-1"></i>現在の実装では、管理者ロックのパスワードはデプロイ全体で共通です（クラスごとに個別の教員アカウントを分離するには、フェーズ3の発展としてFirebase Authenticationベースの教員アカウント管理が必要になります）。
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="student-view-tab" class="tab-content active space-y-6">
+            <div id="student-stage-login" class="max-w-md mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-4 text-center">
+                <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-xl mx-auto"><i class="fa-solid fa-user-lock"></i></div>
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900">生徒個人用ログインポータル</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">画面上部の「現在のクラス」で自分の所属クラスを選択したうえで、名前を選びパスワードを入力してください。</p>
+                </div>
+                <div class="space-y-3 text-left">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-1">ログインする生徒アカウント</label>
+                        <select id="student-selector-dropdown" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"></select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-1">認証パスワード</label>
+                        <input type="password" id="student-login-pass-input" placeholder="••••••••" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+                <button onclick="executeStudentLogin()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all">認証して学習を開始</button>
+            </div>
+
+            <div id="student-workspace" class="hidden grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div class="lg:col-span-1 space-y-4">
+                    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-9 h-9 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center text-sm font-bold"><i class="fa-solid fa-user-graduate"></i></div>
+                            <div>
+                                <h4 id="student-profile-name" class="text-xs font-bold text-slate-900">---</h4>
+                                <p class="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center"><i class="fa-solid fa-graduation-cap mr-1"></i>学習中アカウント</p>
+                            </div>
+                        </div>
+                        <button onclick="executeStudentLogoutSequence()" class="text-[10px] font-bold text-slate-400 hover:text-rose-600 transition-all"><i class="fa-solid fa-right-from-bracket mr-1"></i>終了</button>
+                    </div>
+
+                    <div id="student-stage-nav" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+                        <div>
+                            <h3 class="text-xs font-bold text-slate-800">挑戦する単元の選択</h3>
+                            <p class="text-[10px] text-slate-400 mt-0.5">いつでも途中で変更・再開できます。</p>
+                        </div>
+                        <div id="student-unit-category-list" class="space-y-2 max-h-96 overflow-y-auto pt-1"></div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-3 space-y-4">
+                    <div id="student-stage-play" class="hidden bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                                <span id="student-active-unit-badge" class="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-md">---</span>
+                                <h2 id="student-active-unit-title" class="text-sm font-bold text-slate-800 mt-1">---</h2>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase">推定理解度</p>
+                                <span id="student-current-level-indicator" class="inline-block mt-0.5 px-2.5 py-0.5 bg-indigo-600 text-white text-[11px] font-bold rounded-full shadow-sm">Level 1</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1">
+                            <div class="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                                <span><i class="fa-solid fa-gauge-high mr-1"></i>習熟度スコア（フェーズ2：正誤＋解答スピードを加味）</span>
+                                <span id="student-mastery-score-label">50 / 100</span>
+                            </div>
+                            <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div id="student-mastery-score-bar" class="h-full bg-indigo-500 transition-all duration-500" style="width:50%"></div>
+                            </div>
+                        </div>
+
+                        <div id="student-question-render-zone" class="p-4 bg-slate-50 rounded-xl border border-slate-100 min-h-24 flex items-center text-slate-800 text-sm leading-relaxed overflow-x-auto"></div>
+
+                        <div id="student-choices-container" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+
+                        <div id="immediate-feedback-banner" class="p-4 rounded-xl hidden flex items-start gap-3"></div>
+                    </div>
+
+                    <div id="student-history-panel" class="hidden bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs font-bold text-slate-800"><i class="fa-solid fa-chart-line text-indigo-500 mr-1.5"></i>この単元の学習履歴</h3>
+                            <span class="text-[10px] text-slate-400">直近の解答から自動生成</span>
+                        </div>
+                        <div id="student-mastery-sparkline" class="w-full"></div>
+                        <div id="student-recent-attempts" class="flex flex-wrap gap-1.5"></div>
+                    </div>
+
+                    <div id="problem-empty-placeholder" class="bg-white p-12 rounded-2xl border border-slate-200 shadow-sm text-center space-y-3">
+                        <div class="text-slate-200 text-5xl"><i class="fa-solid fa-folder-open"></i></div>
+                        <h4 class="text-xs font-bold text-slate-500">学習を開始しましょう</h4>
+                        <p class="text-[11px] text-slate-400 max-w-xs mx-auto">左側のメニューから挑戦したい小単元を選択すると、あなたの理解度レベルに応じた問題が自動抽出されます。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 mt-12 py-4">
+        <div class="max-w-7xl mx-auto px-4 text-center text-[10px] text-slate-400 font-medium">
+            &copy; Math Adaptive Learning System (MALS) - フェーズ1〜4（信頼性強化／適応学習エンジン／マルチテナント＆共有／出題形式拡張）対応版
+        </div>
+    </footer>
+
+    <script>
+        // --- 内部インメモリステート保持構造 ---
+        // フェーズ3：categories/problems/students/progress は「現在選択中のクラス」のデータを表す
+        let categories = {};
+        let problems = {};
+        let students = {};
+        let progress = {};
+        let adminAuth = null; // { hash, salt } 管理者ロック用（フェーズ1：信頼性の担保）／デプロイ全体で共通
+
+        let classes = {};          // { classId: { id, name, createdAt, archived } } グローバル（全クラス共通）
+        let currentClassId = null; // 現在選択中のクラスID
+        let classDataRef = null;   // Firebase使用時：現在のクラスのデータへのリアルタイムリスナー参照
+        let sharedTemplates = {};  // { templateId: {...} } 教員間で共有される問題テンプレート（フェーズ3）
+
+        let currentStudent = null;
+        let currentUnitCategory = null;
+        let currentActiveProblem = null;
+        let currentQuestionStartedAt = null; // フェーズ2：解答スピード計測用
+
+        let isFirebaseActive = false;
+        let dbRef = null;
+
+        let isAdminUnlocked = false;
+        let pendingAdminTarget = null;
+        let isStudentArchivePanelOpen = false;
+        let isCategoryArchivePanelOpen = false;
+        let isClassArchivePanelOpen = false;
+        let extractedProblemCandidates = []; // フェーズ4：PDF/Word抽出プレビュー用バッファ
+
+        // --- 初期ロード処理 ---
+        document.addEventListener("DOMContentLoaded", () => {
+            // セッション内で既に管理者ロックを解除済みなら維持する（タブを閉じると失効）
+            isAdminUnlocked = sessionStorage.getItem("mals_admin_unlocked") === "1";
+            updateRelockButtonVisibility();
+
+            const savedConfigRaw = localStorage.getItem("mals_fb_config");
+            if (savedConfigRaw) {
+                try {
+                    populateFirebaseConfigFields(JSON.parse(savedConfigRaw));
+                } catch (e) {
+                    console.warn("保存済みFirebase設定の読み込みに失敗しました。", e);
+                }
+                initializeFirebaseConnection(true);
+            } else {
+                extractGlobalFromLocalStorage();
+                bootstrapClassSelection();
+            }
+        });
+
+        // ============================================================
+        // フェーズ1改善：Firebase設定を項目別入力に分割（初心者向けUX）
+        // ============================================================
+        const FIREBASE_CONFIG_FIELDS = ["apiKey", "authDomain", "databaseURL", "projectId", "storageBucket", "messagingSenderId", "appId"];
+        const FIREBASE_REQUIRED_FIELDS = ["apiKey", "authDomain", "databaseURL", "projectId", "appId"];
+        const FIREBASE_FIELD_LABELS = {
+            apiKey: "apiKey", authDomain: "authDomain", databaseURL: "databaseURL",
+            projectId: "projectId", storageBucket: "storageBucket", messagingSenderId: "messagingSenderId", appId: "appId"
+        };
+
+        function collectFirebaseConfigFromFields() {
+            const config = {};
+            FIREBASE_CONFIG_FIELDS.forEach(f => {
+                const el = document.getElementById("fb-" + f);
+                const v = el ? el.value.trim() : "";
+                if (v) config[f] = v;
+            });
+            return config;
+        }
+
+        function populateFirebaseConfigFields(config) {
+            FIREBASE_CONFIG_FIELDS.forEach(f => {
+                const el = document.getElementById("fb-" + f);
+                if (el && config[f]) el.value = config[f];
+            });
+        }
+
+        function clearFirebaseConfigFields() {
+            if (!confirm("入力済みのFirebase設定項目をすべてクリアしますか？（保存済みの接続設定はこの操作では削除されません）")) return;
+            FIREBASE_CONFIG_FIELDS.forEach(f => {
+                const el = document.getElementById("fb-" + f);
+                if (el) el.value = "";
+            });
+            clearFirebaseFieldErrors();
+        }
+
+        function highlightMissingFirebaseFields(missingKeys) {
+            clearFirebaseFieldErrors();
+            missingKeys.forEach(f => {
+                const wrap = document.querySelector(`[data-fb-field="${f}"]`);
+                const el = document.getElementById("fb-" + f);
+                if (wrap) wrap.classList.add("ring-2", "ring-rose-400", "rounded-xl");
+                if (el) el.classList.add("border-rose-400");
+            });
+        }
+
+        function clearFirebaseFieldErrors() {
+            FIREBASE_CONFIG_FIELDS.forEach(f => {
+                const wrap = document.querySelector(`[data-fb-field="${f}"]`);
+                const el = document.getElementById("fb-" + f);
+                if (wrap) wrap.classList.remove("ring-2", "ring-rose-400", "rounded-xl");
+                if (el) el.classList.remove("border-rose-400");
+            });
+        }
+
+        function toggleFirebaseSetupGuide() {
+            const body = document.getElementById("firebase-setup-guide-body");
+            const icon = document.getElementById("firebase-guide-toggle-icon");
+            const isHidden = body.classList.toggle("hidden");
+            icon.className = isHidden ? "fa-solid fa-chevron-right text-[10px] text-amber-500" : "fa-solid fa-chevron-down text-[10px] text-amber-500";
+        }
+
+        // Firebase Consoleの「SDKの設定と構成」コードを丸ごと貼り付けると、各項目に自動で振り分ける
+        function autoFillFirebaseConfigFromPaste() {
+            const raw = document.getElementById("fb-paste-autofill").value;
+            if (!raw.trim()) { alert("貼り付け欄が空です。Firebase Consoleに表示されたコードをコピーして貼り付けてください。"); return; }
+            let foundCount = 0;
+            FIREBASE_CONFIG_FIELDS.forEach(f => {
+                const re = new RegExp(f + "\\s*:\\s*[\"']([^\"']+)[\"']");
+                const m = raw.match(re);
+                if (m) {
+                    const el = document.getElementById("fb-" + f);
+                    if (el) { el.value = m[1]; foundCount++; }
+                }
+            });
+            if (foundCount === 0) {
+                alert("設定値を検出できませんでした。Firebase Consoleの「SDKの設定と構成」に表示されるコードをそのまま貼り付けてください。");
+            } else {
+                clearFirebaseFieldErrors();
+                alert(`${foundCount}件の項目を自動入力しました。内容を確認のうえ「接続・保存」を押してください。`);
+            }
+        }
+
+        // --- Firebase初期化＆コネクション制御（項目別フィールドから構成） ---
+        function initializeFirebaseConnection(isSilent = false) {
+            const config = collectFirebaseConfigFromFields();
+            const missing = FIREBASE_REQUIRED_FIELDS.filter(f => !config[f]);
+
+            if (missing.length > 0) {
+                if (!isSilent) {
+                    highlightMissingFirebaseFields(missing);
+                    alert(`次の必須項目が未入力です：\n${missing.map(f => "・" + FIREBASE_FIELD_LABELS[f]).join("\n")}`);
+                }
+                return;
+            }
+            clearFirebaseFieldErrors();
+
+            try {
+                if(firebase.apps.length === 0) {
+                    firebase.initializeApp(config);
+                }
+                dbRef = firebase.database().ref("mals_v6_system");
+                isFirebaseActive = true;
+                localStorage.setItem("mals_fb_config", JSON.stringify(config));
+
+                document.getElementById("dash-sync-status").innerHTML = `<i class="fa-solid fa-circle text-emerald-500 animate-pulse mr-1.5"></i>クラウド同期中`;
+                const icon = document.getElementById("dash-sync-icon");
+                icon.className = "p-3 bg-emerald-50 text-emerald-600 rounded-xl text-lg";
+
+                // グローバルノード（管理者認証／クラス一覧／共有テンプレート）のリアルタイムリスナー
+                dbRef.child("adminAuth").on("value", (snap) => { adminAuth = snap.val() || null; });
+                dbRef.child("sharedTemplates").on("value", (snap) => {
+                    sharedTemplates = snap.val() || {};
+                    renderSharedTemplateLibrary();
+                });
+                dbRef.child("classes").on("value", (snap) => {
+                    classes = snap.val() || {};
+                    renderClassContextSelector();
+                    renderClassManagementList();
+                    bootstrapClassSelection();
+                });
+
+                if(!isSilent) alert("Firebase Realtime Database と正常に同期されました。");
+            } catch (e) {
+                console.error(e);
+                alert("Firebase接続に失敗しました。各項目の値（特にapiKeyとdatabaseURL）を確認してください。");
+                isFirebaseActive = false;
+            }
+        }
+
+        // ============================================================
+        // フェーズ3：マルチテナント化 ── クラス（学校/クラス単位）データ分離
+        // ============================================================
+        // adminAuth / classes / sharedTemplates はデプロイ全体で共有するグローバルノード。
+        // categories / problems / students / progress は選択中クラスに閉じたスコープで保存する。
+        const GLOBAL_SYNC_NODES = ["adminAuth", "classes", "sharedTemplates"];
+
+        // --- クラウドコミット＆ストレージ同期（グローバル or クラス別スコープに自動振り分け） ---
+        function commitCloudSync(nodeName, dataObject) {
+            const isGlobalNode = GLOBAL_SYNC_NODES.includes(nodeName);
+            if (!isGlobalNode && !currentClassId) {
+                console.warn(`クラス未選択のため「${nodeName}」の保存をスキップしました。`);
+                return;
+            }
+
+            if (isFirebaseActive && dbRef) {
+                if (isGlobalNode) {
+                    dbRef.child(nodeName).set(dataObject);
+                } else {
+                    dbRef.child("classData").child(currentClassId).child(nodeName).set(dataObject);
+                }
+            } else {
+                if (isGlobalNode) {
+                    localStorage.setItem(`mals_local_${nodeName}`, JSON.stringify(dataObject));
+                } else {
+                    localStorage.setItem(`mals_local_class_${currentClassId}_${nodeName}`, JSON.stringify(dataObject));
+                }
+                synchronizeLocalUIRenders();
+            }
+        }
+
+        // グローバルデータ（クラス一覧・管理者認証・共有テンプレート）をlocalStorageから読み込む
+        function extractGlobalFromLocalStorage() {
+            classes = JSON.parse(localStorage.getItem("mals_local_classes")) || {};
+            adminAuth = JSON.parse(localStorage.getItem("mals_local_adminAuth")) || null;
+            sharedTemplates = JSON.parse(localStorage.getItem("mals_local_sharedTemplates")) || {};
+        }
+
+        // 指定クラスのデータ（カリキュラム・生徒・進捗）をlocalStorageから読み込む
+        function extractClassFromLocalStorage(classId) {
+            categories = JSON.parse(localStorage.getItem(`mals_local_class_${classId}_categories`)) || {};
+            problems = JSON.parse(localStorage.getItem(`mals_local_class_${classId}_problems`)) || {};
+            students = JSON.parse(localStorage.getItem(`mals_local_class_${classId}_students`)) || {};
+            progress = JSON.parse(localStorage.getItem(`mals_local_class_${classId}_progress`)) || {};
+        }
+
+        // 起動時／クラス一覧更新時に、有効なクラスへ自動的に接続する
+        function bootstrapClassSelection() {
+            const activeIds = Object.keys(classes).filter(id => !classes[id].archived);
+
+            if (activeIds.length === 0) {
+                // クラスが1件も無い場合は、初回体験を保つためサンプルクラスを自動作成する
+                if (!window.__mals_seeding_in_progress) {
+                    window.__mals_seeding_in_progress = true;
+                    createNewClass("サンプルクラス（三角比）", true);
+                }
+                return;
+            }
+
+            if (currentClassId && classes[currentClassId] && !classes[currentClassId].archived) {
+                return; // 既に有効なクラスに接続済み
+            }
+
+            const savedActiveId = localStorage.getItem("mals_active_class_id");
+            const targetId = (savedActiveId && classes[savedActiveId] && !classes[savedActiveId].archived)
+                ? savedActiveId
+                : activeIds[0];
+            switchToClass(targetId);
+        }
+
+        // クラスを切り替える（Firebaseリスナーの付け替え／localStorageの読み込みを含む）
+        function switchToClass(classId) {
+            if (!classes[classId]) return;
+            currentClassId = classId;
+            localStorage.setItem("mals_active_class_id", classId);
+
+            if (classDataRef) { classDataRef.off(); classDataRef = null; }
+
+            if (isFirebaseActive && dbRef) {
+                classDataRef = dbRef.child("classData").child(classId);
+                classDataRef.on("value", (snap) => {
+                    const data = snap.val() || {};
+                    categories = data.categories || {};
+                    problems = data.problems || {};
+                    students = data.students || {};
+                    progress = data.progress || {};
+                    synchronizeLocalUIRenders();
+                });
+            } else {
+                extractClassFromLocalStorage(classId);
+                synchronizeLocalUIRenders();
+            }
+
+            renderClassContextSelector();
+            renderClassManagementList();
+            // 別クラスに切り替わったら、生徒ログイン状態は一旦リセットする（データ越境防止）
+            executeStudentLogoutSequence();
+        }
+
+        function handleClassContextChange(classId) {
+            if (!classId || classId === currentClassId) return;
+            switchToClass(classId);
+        }
+
+        function createNewClass(prefilledName, seedDefault) {
+            const nameInputEl = document.getElementById('new-class-name-input');
+            const name = prefilledName || (nameInputEl ? nameInputEl.value.trim() : '');
+            if (!name) { alert("クラス名を入力してください。"); return; }
+
+            const id = 'class-' + Date.now();
+            classes[id] = { id, name, createdAt: Date.now(), archived: false };
+            commitCloudSync('classes', classes);
+            if (nameInputEl) nameInputEl.value = "";
+
+            switchToClass(id);
+            if (seedDefault) {
+                seedDefaultCurriculumForClass(id);
+            }
+            window.__mals_seeding_in_progress = false;
+        }
+
+        // 新規クラス作成時にサンプルカリキュラムを投入する（初回起動時の体験を維持）
+        function seedDefaultCurriculumForClass(classId) {
+            if (classId !== currentClassId) return;
+
+            categories = {
+                "cat-root-1": { id: "cat-root-1", name: "数学I：図形と計量（三角比）", parentId: "root", archived: false },
+                "cat-sub-1": { id: "cat-sub-1", name: "三角比の定義・概念", parentId: "cat-root-1", archived: false },
+                "cat-sub-2": { id: "cat-sub-2", name: "有名角の三角比の計算", parentId: "cat-root-1", archived: false },
+                "cat-sub-3": { id: "cat-sub-3", name: "三角比の相互関係公式", parentId: "cat-root-1", archived: false }
+            };
+
+            const initialPool = [
+                { id: "p1", categoryId: "cat-sub-1", level: 1, type: "choice", question: "直角三角形において、角度 $\\theta$ の『対辺 / 斜辺』で表現される三角比はどれか？", choices: ["$\\sin \\theta$", "$\\cos \\theta$", "$\\tan \\theta$", "存在しない"], correct: 0 },
+                { id: "p2", categoryId: "cat-sub-1", level: 2, type: "choice", question: "直角三角形の斜辺が $5$、隣辺が $4$、対辺が $3$ であるとき、$\\cos \\theta$ の値は？", choices: ["$\\frac{3}{5}$", "$\\frac{4}{5}$", "$\\frac{3}{4}$", "$\\frac{4}{3}$"], correct: 1 },
+                { id: "p3", categoryId: "cat-sub-1", level: 3, type: "choice", question: "傾きが $2$ の直線が $x$ 軸の正の向きとなす角を $\\theta$ とするとき、$\\tan \\theta$ の値として正しいものは？", choices: ["$1$", "$\\frac{1}{2}$", "$2$", "$\\sqrt{5}$"], correct: 2 },
+                { id: "p4", categoryId: "cat-sub-2", level: 1, type: "choice", question: "$\\theta = 45^\\circ$ のときの $\\sin \\theta$ の値を求めなさい。", choices: ["$\\frac{1}{2}$", "$\\frac{\\sqrt{3}}{2}$", "$\\frac{1}{\\sqrt{2}}$", "$1$"], correct: 2 },
+                { id: "p5", categoryId: "cat-sub-2", level: 2, type: "choice", question: "$\\theta = 120^\\circ$ のときの $\\cos \\theta$ の値を選びなさい。", choices: ["$\\frac{1}{2}$", "$-\\frac{1}{2}$", "$\\frac{\\sqrt{3}}{2}$", "$-\\frac{\\sqrt{3}}{2}$"], correct: 1 },
+                { id: "p6", categoryId: "cat-sub-2", level: 3, type: "choice", question: "$\\sin 135^\\circ \\times \\cos 150^\\circ \\times \\tan 60^\\circ$ の計算結果は？", choices: ["$\\frac{\\sqrt{6}}{4}$", "$-\\frac{\\sqrt{6}}{4}$", "$\\frac{3}{4}$", "$-\\frac{3}{2}$"], correct: 3 },
+                { id: "p7", categoryId: "cat-sub-3", level: 1, type: "choice", question: "任意の角度 $\\theta$ において、恒等式 $\\sin^2\\theta + \\cos^2\\theta$ は常にどの値をとるか？", choices: ["$0$", "$1$", "$\\tan\\theta$", "不定"], correct: 1 },
+                { id: "p8", categoryId: "cat-sub-3", level: 2, type: "choice", question: "$\\theta$ が鋭角で $\\sin\\theta = \\frac{3}{5}$ のとき、$\\cos\\theta$ の正しい値はどれか？", choices: ["$\\frac{4}{5}$", "$\\frac{16}{25}$", "$\\frac{2}{5}$", "$-\\frac{4}{5}$"], correct: 0 },
+                { id: "p9", categoryId: "cat-sub-3", level: 3, type: "choice", question: "$\\sin\\theta + \\cos\\theta = \\frac{1}{2}$ のとき、$\\sin\\theta\\cos\\theta$ の積の値は？", choices: ["$\\frac{1}{4}$", "$\\frac{3}{8}$", "$-\\frac{3}{8}$", "$-\\frac{1}{2}$"], correct: 2 }
+            ];
+
+            problems = {};
+            initialPool.forEach(p => { problems[p.id] = p; });
+
+            commitCloudSync('categories', categories);
+            commitCloudSync('problems', problems);
+        }
+
+        // --- クラス管理UI ---
+        function renderClassContextSelector() {
+            const select = document.getElementById('class-context-select');
+            if (!select) return;
+            const activeIds = Object.keys(classes).filter(id => !classes[id].archived);
+            if (activeIds.length === 0) {
+                select.innerHTML = `<option value="">クラス未作成</option>`;
+                return;
+            }
+            select.innerHTML = activeIds.map(id => `<option value="${id}" ${id === currentClassId ? 'selected' : ''}>${classes[id].name}</option>`).join('');
+        }
+
+        function renderClassManagementList() {
+            const list = document.getElementById('class-management-list');
+            if (!list) return;
+            const activeIds = Object.keys(classes).filter(id => !classes[id].archived);
+            if (activeIds.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400 col-span-full">クラスがまだ作成されていません。</p>`;
+            } else {
+                list.innerHTML = activeIds.map(id => {
+                    const cls = classes[id];
+                    const isActive = id === currentClassId;
+                    return `
+                        <div class="p-3 border rounded-xl flex items-center justify-between text-xs ${isActive ? 'bg-indigo-50 border-indigo-300' : 'bg-slate-50 border-slate-200'}">
+                            <div class="min-w-0">
+                                <p class="font-bold text-slate-800 truncate">${cls.name} ${isActive ? '<span class="text-[9px] text-indigo-600 font-bold ml-1">● 選択中</span>' : ''}</p>
+                                <p class="text-[9px] text-slate-400">作成日: ${new Date(cls.createdAt).toLocaleDateString('ja-JP')}</p>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                                ${!isActive ? `<button onclick="switchToClass('${id}')" class="px-2 py-1 bg-white border border-slate-300 text-slate-600 rounded-md font-bold hover:bg-slate-100 transition-all">切替</button>` : ''}
+                                <button onclick="archiveClass('${id}')" class="text-slate-300 hover:text-amber-500 transition-all" title="アーカイブ"><i class="fa-solid fa-box-archive"></i></button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            renderClassArchiveList();
+        }
+
+        function renderClassArchiveList() {
+            const list = document.getElementById('class-archive-list');
+            if (!list) return;
+            const archivedIds = Object.keys(classes).filter(id => classes[id].archived);
+            if (archivedIds.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400 col-span-full">アーカイブ済みのクラスはありません。</p>`;
+                return;
+            }
+            list.innerHTML = archivedIds.map(id => {
+                const cls = classes[id];
+                return `
+                    <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs">
+                        <span class="font-bold text-amber-900 truncate">${cls.name}</span>
+                        <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                            <button onclick="restoreClass('${id}')" class="px-2 py-1 bg-white border border-amber-300 text-amber-700 rounded-md font-bold hover:bg-amber-100 transition-all"><i class="fa-solid fa-rotate-left mr-1"></i>復元</button>
+                            <button onclick="purgeClass('${id}')" class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md font-bold transition-all"><i class="fa-solid fa-trash-can mr-1"></i>完全削除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleClassArchivePanel() {
+            isClassArchivePanelOpen = !isClassArchivePanelOpen;
+            document.getElementById('class-archive-list').classList.toggle('hidden', !isClassArchivePanelOpen);
+            document.getElementById('class-archive-toggle-icon').className = isClassArchivePanelOpen
+                ? "fa-solid fa-chevron-down mr-1.5 text-[9px]"
+                : "fa-solid fa-chevron-right mr-1.5 text-[9px]";
+        }
+
+        function archiveClass(classId) {
+            const cls = classes[classId];
+            if (!cls) return;
+            const typed = prompt(`このクラスをアーカイブします（生徒・問題・進捗データは保持されます）。\n確認のためクラス名「${cls.name}」を正確に入力してください。`);
+            if (typed === null) return;
+            if (typed !== cls.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+
+            cls.archived = true;
+            cls.archivedAt = Date.now();
+            commitCloudSync('classes', classes);
+
+            if (currentClassId === classId) {
+                currentClassId = null;
+                localStorage.removeItem("mals_active_class_id");
+                if (classDataRef) { classDataRef.off(); classDataRef = null; }
+                categories = {}; problems = {}; students = {}; progress = {};
+                bootstrapClassSelection();
+            }
+            renderClassManagementList();
+            renderClassContextSelector();
+        }
+
+        function restoreClass(classId) {
+            if (!classes[classId]) return;
+            classes[classId].archived = false;
+            classes[classId].archivedAt = null;
+            commitCloudSync('classes', classes);
+            renderClassManagementList();
+            renderClassContextSelector();
+        }
+
+        function purgeClass(classId) {
+            const cls = classes[classId];
+            if (!cls) return;
+            const typed = prompt(`完全に削除すると、このクラスの生徒・問題・進捗データも復元できません。\n確認のためクラス名「${cls.name}」を正確に入力してください。`);
+            if (typed === null) return;
+            if (typed !== cls.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+
+            delete classes[classId];
+            commitCloudSync('classes', classes);
+
+            if (isFirebaseActive && dbRef) {
+                dbRef.child('classData').child(classId).remove();
+            } else {
+                ['categories', 'problems', 'students', 'progress'].forEach(n => localStorage.removeItem(`mals_local_class_${classId}_${n}`));
+            }
+
+            if (currentClassId === classId) {
+                currentClassId = null;
+                localStorage.removeItem("mals_active_class_id");
+                categories = {}; problems = {}; students = {}; progress = {};
+                bootstrapClassSelection();
+            }
+            renderClassManagementList();
+            renderClassContextSelector();
+        }
+
+        // ============================================================
+        // フェーズ1：信頼性の担保 ── パスワードハッシュ化ユーティリティ
+        // ============================================================
+        // SubtleCrypto（SHA-256 + ソルト）を優先使用。単一HTML・オフライン動作という
+        // 6.1の強みを維持するため、非対応環境（file://等）では簡易ハッシュにフォールバックする。
+        function generateSalt() {
+            if (window.crypto && window.crypto.getRandomValues) {
+                const arr = new Uint8Array(16);
+                window.crypto.getRandomValues(arr);
+                return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+            }
+            return Math.random().toString(36).slice(2) + Date.now().toString(36);
+        }
+
+        async function hashPassword(password, salt) {
+            const raw = `${salt}:${password}`;
+            if (window.crypto && window.crypto.subtle) {
+                try {
+                    const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+                    return "sha256:" + Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+                } catch (e) {
+                    console.warn("SubtleCrypto でのハッシュ化に失敗したため簡易ハッシュにフォールバックします。", e);
+                }
+            }
+            // 簡易フォールバック（暗号学的に安全ではないが平文保存よりは望ましい）
+            let h = 0;
+            for (let i = 0; i < raw.length; i++) { h = (Math.imul(31, h) + raw.charCodeAt(i)) | 0; }
+            return "fallback:" + (h >>> 0).toString(16);
+        }
+
+        async function verifyPassword(password, salt, storedHash) {
+            const attempt = await hashPassword(password, salt);
+            return attempt === storedHash;
+        }
+
+        function copySecurityRulesJson() {
+            const text = document.getElementById("security-rules-json").innerText;
+            const feedback = document.getElementById("security-rules-copy-feedback");
+            const showFeedback = () => {
+                if (!feedback) return;
+                feedback.classList.remove("hidden");
+                setTimeout(() => feedback.classList.add("hidden"), 2000);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(showFeedback).catch(() => alert("コピーに失敗しました。手動で選択してコピーしてください。"));
+            } else {
+                alert("このブラウザはクリップボードAPIに対応していません。手動で選択してコピーしてください。");
+            }
+        }
+
+        // ============================================================
+        // フェーズ1：信頼性の担保 ── 管理者ロック（教員機能へのアクセスゲート）
+        // ============================================================
+        function attemptSwitchTab(id) {
+            if (isAdminUnlocked) { switchTab(id); return; }
+            pendingAdminTarget = id;
+            openAdminLockModal();
+        }
+
+        function updateRelockButtonVisibility() {
+            const btn = document.getElementById('btn-relock-admin');
+            if (btn) btn.classList.toggle('hidden', !isAdminUnlocked);
+        }
+
+        // 教員が生徒に端末を渡す前に、明示的に管理者ロックをかけ直す
+        function relockAdmin() {
+            isAdminUnlocked = false;
+            sessionStorage.removeItem('mals_admin_unlocked');
+            updateRelockButtonVisibility();
+            switchTab('student-view-tab');
+        }
+
+        function openAdminLockModal() {
+            const modal = document.getElementById("admin-lock-modal");
+            const title = document.getElementById("admin-lock-title");
+            const subtitle = document.getElementById("admin-lock-subtitle");
+            const body = document.getElementById("admin-lock-body");
+            const submitBtn = document.getElementById("admin-lock-submit-btn");
+            document.getElementById("admin-lock-error").classList.add("hidden");
+
+            if (!adminAuth) {
+                // 初回セットアップモード
+                title.innerText = "管理者パスワードの初期設定";
+                subtitle.innerText = "教員向け機能（ダッシュボード／単元・問題・CSV管理）を保護するパスワードをこの端末で作成してください。";
+                body.innerHTML = `
+                    <div class="space-y-1">
+                        <label class="block text-[10px] font-bold text-slate-400">新しい管理者パスワード</label>
+                        <input type="password" id="admin-setup-pass1" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="8文字以上を推奨">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="block text-[10px] font-bold text-slate-400">確認のため再入力</label>
+                        <input type="password" id="admin-setup-pass2" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="もう一度入力">
+                    </div>
+                `;
+                submitBtn.innerText = "作成して解除";
+            } else {
+                // ログインモード
+                title.innerText = "管理者ロック解除";
+                subtitle.innerText = "教員向け機能へのアクセスには管理者パスワードが必要です。";
+                body.innerHTML = `
+                    <div class="space-y-1">
+                        <label class="block text-[10px] font-bold text-slate-400">管理者パスワード</label>
+                        <input type="password" id="admin-login-pass" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="••••••••">
+                    </div>
+                `;
+                submitBtn.innerText = "解除する";
+            }
+
+            modal.classList.remove("hidden");
+        }
+
+        function closeAdminLockModal() {
+            document.getElementById("admin-lock-modal").classList.add("hidden");
+            pendingAdminTarget = null;
+        }
+
+        function showAdminLockError(message) {
+            const el = document.getElementById("admin-lock-error");
+            el.innerText = message;
+            el.classList.remove("hidden");
+        }
+
+        async function handleAdminLockSubmit() {
+            if (!adminAuth) {
+                const p1 = document.getElementById("admin-setup-pass1").value;
+                const p2 = document.getElementById("admin-setup-pass2").value;
+                if (!p1 || p1.length < 4) { showAdminLockError("4文字以上のパスワードを入力してください。"); return; }
+                if (p1 !== p2) { showAdminLockError("2つの入力が一致しません。"); return; }
+                const salt = generateSalt();
+                const hash = await hashPassword(p1, salt);
+                adminAuth = { hash, salt, createdAt: Date.now() };
+                commitCloudSync("adminAuth", adminAuth);
+            } else {
+                const attempt = document.getElementById("admin-login-pass").value;
+                const ok = await verifyPassword(attempt, adminAuth.salt, adminAuth.hash);
+                if (!ok) { showAdminLockError("パスワードが一致しません。"); return; }
+            }
+
+            isAdminUnlocked = true;
+            sessionStorage.setItem("mals_admin_unlocked", "1");
+            updateRelockButtonVisibility();
+            closeAdminLockModal();
+            if (pendingAdminTarget) {
+                switchTab(pendingAdminTarget);
+                pendingAdminTarget = null;
+            }
+        }
+
+        // --- 画面UI一括リフレッシュ同期（② 確実な生徒ビュー同期を含む） ---
+        function synchronizeLocalUIRenders() {
+            syncDashboardInterface();
+            updateParentCategorySelects();
+            renderCategoryHierarchy();
+            renderProblemsMatrixPreview();
+            renderStudentLoginSelector(); // 確実に生徒情報をセレクトへ反映
+            renderSharedTemplateLibrary();
+            renderClassContextSelector();
+        }
+
+        // --- 教員：ダッシュボード同期＆マトリクス生成 ---
+        function syncDashboardInterface() {
+            const container = document.getElementById('heatmap-container');
+            if (!container) return;
+
+            const studentIds = Object.keys(students).filter(id => !students[id].archived);
+            const problemIds = Object.keys(problems);
+            document.getElementById('dash-student-count').innerText = `${studentIds.length} 名`;
+            document.getElementById('dash-problem-count').innerText = `${problemIds.length} 問`;
+
+            const subCategoryIds = Object.keys(categories).filter(id => {
+                return categories[id].parentId && categories[id].parentId !== 'root' && !categories[id].archived;
+            });
+
+            if (studentIds.length === 0 || subCategoryIds.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-xs text-slate-400 font-medium"><i class="fa-solid fa-circle-exclamation mr-1.5 text-slate-300"></i>表示可能な生徒、または小単元データが構築されていません。</div>`;
+                renderStudentsGridList();
+                return;
+            }
+
+            // テーブル構造のアセンブル
+            let html = `
+                <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-inner">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200">
+                                <th class="p-3 font-bold text-slate-700 sticky left-0 bg-slate-100 z-10 w-44 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">生徒名</th>
+            `;
+
+            subCategoryIds.forEach(catId => {
+                const subCat = categories[catId];
+                const parentName = categories[subCat.parentId] ? categories[subCat.parentId].name : "大単元";
+                html += `<th class="p-3 font-bold text-slate-600 border-l border-slate-200 min-w-[160px]">${subCat.name}<br><span class="text-[9px] text-slate-400 font-normal">${parentName}</span></th>`;
+            });
+            html += `</tr></thead><tbody>`;
+
+            // 出席番号順にソートしてダッシュボードにレンダリング
+            const sortedStudentIds = studentIds.sort((a,b) => Number(students[a].num || 0) - Number(students[b].num || 0));
+
+            sortedStudentIds.forEach(stId => {
+                const student = students[stId];
+                html += `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50/80 transition-all">
+                        <td class="p-3 font-bold text-slate-800 sticky left-0 bg-white z-10 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.01)]"><span class="text-indigo-600 mr-1 text-[10px]">No.${student.num || '-'}</span>${student.name}</td>
+                `;
+
+                subCategoryIds.forEach(catId => {
+                    const key = `${stId}_${catId}`;
+                    const prog = progress[key] || { currentLevel: 1, correctCount: 0, attemptCount: 0 };
+                    
+                    let bgColor = "bg-slate-50 text-slate-400";
+                    let scoreText = "未着手";
+                    
+                    if (prog.attemptCount > 0) {
+                        const ratio = prog.correctCount / prog.attemptCount;
+                        if (ratio >= 0.8) bgColor = "bg-emerald-50 text-emerald-800 border-emerald-100";
+                        else if (ratio >= 0.5) bgColor = "bg-indigo-50 text-indigo-800 border-indigo-100";
+                        else bgColor = "bg-rose-50 text-rose-800 border-rose-100";
+                        scoreText = `正答 ${prog.correctCount}/${prog.attemptCount}`;
+                    }
+
+                    html += `
+                        <td class="p-3 border-l border-slate-100 ${bgColor} transition-all">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-[11px]">Level ${prog.currentLevel} ${buildTrendIcon(prog)}</span>
+                                <span class="text-[9px] opacity-75 font-medium">${scoreText}</span>
+                            </div>
+                        </td>
+                    `;
+                });
+                html += `</tr>`;
+            });
+
+            html += `</tbody></table></div>`;
+            container.innerHTML = html;
+
+            renderStudentsGridList();
+            renderStruggleDetectionPanel(sortedStudentIds, subCategoryIds);
+        }
+
+        // ============================================================
+        // フェーズ2：誤答パターン分析 ── 傾向アイコン＆「つまずき検出」レコメンド
+        // ============================================================
+        // 直近の履歴を前半／後半に分けて平均スコアを比較し、上昇・下降・横ばいを矢印で示す
+        function buildTrendIcon(prog) {
+            if (!prog || !Array.isArray(prog.history) || prog.history.length < 4) return "";
+            const recent = prog.history.slice(-6);
+            const half = Math.floor(recent.length / 2);
+            const older = recent.slice(0, half);
+            const newer = recent.slice(half);
+            const avg = arr => arr.reduce((s, h) => s + h.score, 0) / arr.length;
+            const diff = avg(newer) - avg(older);
+            if (diff >= 8) return `<i class="fa-solid fa-arrow-trend-up text-emerald-500" title="直近で理解度が上昇傾向"></i>`;
+            if (diff <= -8) return `<i class="fa-solid fa-arrow-trend-down text-rose-500" title="直近で理解度が下降傾向"></i>`;
+            return `<i class="fa-solid fa-arrow-right text-slate-300" title="横ばい"></i>`;
+        }
+
+        // クラス全体を横断し、要フォローが必要な小単元・生徒を自動検出して教員に提示する
+        function renderStruggleDetectionPanel(studentIds, subCategoryIds) {
+            const container = document.getElementById('struggle-detection-container');
+            if (!container) return;
+
+            const unitStats = subCategoryIds.map(catId => {
+                let struggledStudents = [];
+                let scoreSum = 0, scoreCount = 0;
+
+                studentIds.forEach(stId => {
+                    const prog = progress[`${stId}_${catId}`];
+                    if (!prog || !prog.attemptCount) return;
+                    const score = typeof prog.masteryScore === 'number' ? prog.masteryScore : 50;
+                    scoreSum += score; scoreCount += 1;
+
+                    const history = Array.isArray(prog.history) ? prog.history : [];
+                    const lastTwoIncorrect = history.length >= 2 && history.slice(-2).every(h => !h.correct);
+                    const isLowScore = score <= 30 && prog.attemptCount >= 3;
+
+                    if (isLowScore || lastTwoIncorrect) {
+                        struggledStudents.push(students[stId] ? students[stId].name : "(不明)");
+                    }
+                });
+
+                return {
+                    catId,
+                    name: categories[catId] ? categories[catId].name : catId,
+                    avgScore: scoreCount > 0 ? scoreSum / scoreCount : null,
+                    struggledStudents
+                };
+            }).filter(u => u.struggledStudents.length > 0)
+              .sort((a, b) => b.struggledStudents.length - a.struggledStudents.length || (a.avgScore ?? 100) - (b.avgScore ?? 100))
+              .slice(0, 3);
+
+            if (unitStats.length === 0) {
+                container.innerHTML = `<p class="text-[11px] text-slate-400"><i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i>現在、要フォローとして検出されている単元はありません。</p>`;
+                return;
+            }
+
+            container.innerHTML = unitStats.map(u => `
+                <div class="flex items-start gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                    <div class="p-1.5 bg-rose-100 text-rose-600 rounded-lg mt-0.5 text-xs"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                    <div class="min-w-0">
+                        <p class="text-[11px] font-bold text-rose-900 truncate">${u.name}</p>
+                        <p class="text-[10px] text-rose-600 mt-0.5">
+                            平均習熟度 ${u.avgScore !== null ? Math.round(u.avgScore) : '-'} / 100・要フォロー ${u.struggledStudents.length} 名
+                            <span class="block mt-0.5 text-rose-500 truncate">対象: ${u.struggledStudents.join('、')}</span>
+                        </p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ① 生徒名簿表示（パスワードは非表示・再設定/アーカイブ操作に対応）
+        function renderStudentsGridList() {
+            const list = document.getElementById('students-grid-list');
+            if(!list) return;
+            const studentIds = Object.keys(students).filter(id => !students[id].archived);
+            if(studentIds.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400 col-span-full">登録された生徒がいません。</p>`;
+            } else {
+                const sortedIds = studentIds.sort((a,b) => Number(students[a].num || 0) - Number(students[b].num || 0));
+                list.innerHTML = sortedIds.map(id => `
+                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col justify-between text-xs gap-1.5">
+                        <div class="flex items-center justify-between font-bold text-slate-700">
+                            <span class="truncate"><span class="text-indigo-600 mr-1.5">No.${students[id].num || '-'}</span>${students[id].name}</span>
+                            <button onclick="archiveStudentAccount('${id}')" class="text-slate-300 hover:text-amber-500 transition-all ml-1" title="アーカイブ（無効化）"><i class="fa-solid fa-box-archive"></i></button>
+                        </div>
+                        <div class="text-[10px] bg-white border border-slate-100 px-2 py-1 rounded text-slate-500 font-medium flex justify-between items-center">
+                            <span><i class="fa-solid fa-lock mr-1 text-slate-400"></i>認証: 設定済み</span>
+                            <button onclick="resetStudentPassword('${id}')" class="text-indigo-500 hover:text-indigo-700 font-bold">再設定</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            renderStudentsArchiveList();
+        }
+
+        // アーカイブ済み生徒一覧（復元・完全削除）
+        function renderStudentsArchiveList() {
+            const list = document.getElementById('students-archive-list');
+            if(!list) return;
+            const archivedIds = Object.keys(students).filter(id => students[id].archived);
+            if(archivedIds.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400 col-span-full">アーカイブ済みの生徒はいません。</p>`;
+                return;
+            }
+            list.innerHTML = archivedIds.map(id => `
+                <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl flex flex-col justify-between text-xs gap-1.5">
+                    <div class="font-bold text-amber-900 truncate"><span class="mr-1.5">No.${students[id].num || '-'}</span>${students[id].name}</div>
+                    <div class="flex justify-between gap-2">
+                        <button onclick="restoreStudentAccount('${id}')" class="flex-1 py-1 bg-white border border-amber-300 text-amber-700 rounded-lg font-bold text-[10px] hover:bg-amber-100 transition-all"><i class="fa-solid fa-rotate-left mr-1"></i>復元</button>
+                        <button onclick="purgeStudentAccount('${id}')" class="flex-1 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-[10px] transition-all"><i class="fa-solid fa-trash-can mr-1"></i>完全削除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleStudentArchivePanel() {
+            isStudentArchivePanelOpen = !isStudentArchivePanelOpen;
+            document.getElementById('students-archive-list').classList.toggle('hidden', !isStudentArchivePanelOpen);
+            document.getElementById('student-archive-toggle-icon').className = isStudentArchivePanelOpen
+                ? "fa-solid fa-chevron-down mr-1.5 text-[9px]"
+                : "fa-solid fa-chevron-right mr-1.5 text-[9px]";
+        }
+
+        // ① 生徒アカウントの登録（パスワードはその場でハッシュ化し、平文は保持しない）
+        async function registerNewStudentAccount() {
+            const numInput = document.getElementById('new-student-num');
+            const nameInput = document.getElementById('new-student-name');
+            const passInput = document.getElementById('new-student-pass');
+
+            const num = numInput.value.trim();
+            const name = nameInput.value.trim();
+            const pass = passInput.value.trim();
+
+            if(!num || !name || !pass) {
+                alert("出席番号、氏名、パスワードをすべて入力してください。");
+                return;
+            }
+
+            const id = 'st-' + Date.now();
+            const salt = generateSalt();
+            const passHash = await hashPassword(pass, salt);
+            students[id] = { id, name, num: parseInt(num), passHash, passSalt: salt, archived: false };
+
+            // フォームバッファをリセット（平文パスワードはメモリ上にも残さない）
+            numInput.value = "";
+            nameInput.value = "";
+            passInput.value = "";
+
+            commitCloudSync('students', students);
+        }
+
+        // 生徒パスワードの再設定（教員がその場で新しいパスワードを設定し、口頭等で生徒に伝達）
+        async function resetStudentPassword(id) {
+            if(!students[id]) return;
+            const newPass = prompt(`「${students[id].name}」さんの新しいパスワードを入力してください。\n（設定後、必ず本人に伝えてください）`);
+            if(!newPass) return;
+            const salt = generateSalt();
+            students[id].passHash = await hashPassword(newPass, salt);
+            students[id].passSalt = salt;
+            commitCloudSync('students', students);
+            alert("パスワードを再設定しました。");
+        }
+
+        // 生徒アカウントのアーカイブ（論理削除・確認は氏名の入力で担保）
+        function archiveStudentAccount(id) {
+            const student = students[id];
+            if(!student) return;
+            const typed = prompt(`このアカウントをアーカイブ（無効化）します。\n確認のため氏名「${student.name}」を正確に入力してください。`);
+            if (typed === null) return;
+            if (typed !== student.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+            student.archived = true;
+            student.archivedAt = Date.now();
+            commitCloudSync('students', students);
+        }
+
+        // アーカイブ済みアカウントの復元
+        function restoreStudentAccount(id) {
+            if(!students[id]) return;
+            students[id].archived = false;
+            students[id].archivedAt = null;
+            commitCloudSync('students', students);
+        }
+
+        // アーカイブ済みアカウントの完全削除（復元不可・タイプ確認必須）
+        function purgeStudentAccount(id) {
+            const student = students[id];
+            if(!student) return;
+            const typed = prompt(`完全に削除すると学習履歴を含め復元できません。\n確認のため氏名「${student.name}」を正確に入力してください。`);
+            if (typed === null) return;
+            if (typed !== student.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+            delete students[id];
+            Object.keys(progress).forEach(k => {
+                if(k.startsWith(id + "_")) delete progress[k];
+            });
+            commitCloudSync('students', students);
+            commitCloudSync('progress', progress);
+        }
+
+        // ③ 大単元の新規作成処理
+        function executeRootCategoryRegistration() {
+            const input = document.getElementById('root-category-name-input');
+            const name = input.value.trim();
+            if(!name) { alert("大単元名を入力してください。"); return; }
+            const id = 'cat-root-' + Date.now();
+            categories[id] = { id, name, parentId: 'root', archived: false };
+            input.value = "";
+            commitCloudSync('categories', categories);
+        }
+
+        // ③ 各大単元内での小単元の新規追加処理
+        function executeSubCategoryRegistration(parentId) {
+            const input = document.getElementById(`sub-category-input-${parentId}`);
+            const name = input.value.trim();
+            if(!name) { alert("小単元名を入力してください。"); return; }
+            const id = 'cat-sub-' + Date.now();
+            categories[id] = { id, name, parentId, archived: false };
+            input.value = "";
+            commitCloudSync('categories', categories);
+        }
+
+        // 単元カテゴリのアーカイブ（論理削除・タイプ確認で誤操作を防止）
+        // 大単元をアーカイブすると、配下の小単元も連動してアーカイブされる（問題データ自体は保持される）
+        function archiveCategoryNode(id) {
+            const cat = categories[id];
+            if(!cat) return;
+            const isRoot = cat.parentId === 'root';
+            const warnText = isRoot
+                ? `この大単元と、配下のすべての小単元をアーカイブします。\n（登録済みの問題データ自体は削除されません）\n確認のため単元名「${cat.name}」を正確に入力してください。`
+                : `この小単元をアーカイブします。\n確認のため単元名「${cat.name}」を正確に入力してください。`;
+            const typed = prompt(warnText);
+            if (typed === null) return;
+            if (typed !== cat.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+
+            cat.archived = true;
+            cat.archivedAt = Date.now();
+            if (isRoot) {
+                Object.keys(categories).forEach(cid => {
+                    if (categories[cid].parentId === id) {
+                        categories[cid].archived = true;
+                        categories[cid].archivedAt = Date.now();
+                    }
+                });
+            }
+            commitCloudSync('categories', categories);
+        }
+
+        // アーカイブ済み単元の復元
+        function restoreCategoryNode(id) {
+            if(!categories[id]) return;
+            categories[id].archived = false;
+            categories[id].archivedAt = null;
+            commitCloudSync('categories', categories);
+        }
+
+        // アーカイブ済み単元の完全削除（紐づく問題も同時に完全削除・タイプ確認必須）
+        function purgeCategoryNode(id) {
+            const cat = categories[id];
+            if(!cat) return;
+            const typed = prompt(`完全に削除すると、紐づく登録問題も含めて復元できません。\n確認のため単元名「${cat.name}」を正確に入力してください。`);
+            if (typed === null) return;
+            if (typed !== cat.name) { alert("入力が一致しないため処理を中止しました。"); return; }
+
+            delete categories[id];
+            Object.keys(problems).forEach(pid => {
+                if(problems[pid].categoryId === id) delete problems[pid];
+            });
+            commitCloudSync('categories', categories);
+            commitCloudSync('problems', problems);
+        }
+
+        // 問題作成フォームなどのドロップダウンへの反映（アーカイブ済みは除外）
+        function updateParentCategorySelects() {
+            const probSelect = document.getElementById('problem-category-select');
+            const templateSelect = document.getElementById('template-export-category-select');
+            const docImportSelect = document.getElementById('doc-import-category-select');
+            if(!probSelect) return;
+
+            let subOptions = ``;
+
+            Object.keys(categories).forEach(id => {
+                const cat = categories[id];
+                if (cat.parentId !== 'root' && !cat.archived) {
+                    const parent = categories[cat.parentId];
+                    if (parent && parent.archived) return;
+                    const p = parent ? parent.name : "大単元";
+                    subOptions += `<option value="${cat.id}">${p} ➔ ${cat.name}</option>`;
+                }
+            });
+
+            const finalHtml = subOptions || `<option value="">先に小単元を作成してください</option>`;
+            probSelect.innerHTML = finalHtml;
+            if (templateSelect) templateSelect.innerHTML = finalHtml;
+            if (docImportSelect) docImportSelect.innerHTML = finalHtml;
+        }
+
+        // ③ 2層カリキュラム構造マネージャーUIのレンダリング（アーカイブ済みは除外）
+        function renderCategoryHierarchy() {
+            const container = document.getElementById('category-curriculum-manager');
+            if(!container) return;
+            
+            const roots = Object.keys(categories).filter(id => categories[id].parentId === 'root' && !categories[id].archived);
+            if(roots.length === 0) {
+                container.innerHTML = `<div class="text-center py-6 text-xs text-slate-400 font-medium">大単元がまだ登録されていません。</div>`;
+            } else {
+                let html = "";
+                roots.forEach(rid => {
+                    const subs = Object.keys(categories).filter(id => categories[id].parentId === rid && !categories[id].archived);
+
+                    html += `
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5 shadow-2xs">
+                            <div class="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                                <span class="font-bold text-xs text-slate-800 truncate"><i class="fa-solid fa-folder text-amber-500 mr-1.5"></i>${categories[rid].name}</span>
+                                <button onclick="archiveCategoryNode('${rid}')" class="text-slate-400 hover:text-amber-500 transition-all text-xs" title="大単元をアーカイブ"><i class="fa-solid fa-box-archive"></i></button>
+                            </div>
+                            
+                            <div class="space-y-1.5 pl-1">
+                    `;
+                    
+                    if(subs.length === 0) {
+                        html += `<p class="text-[10px] text-slate-400 italic py-1 pl-2">小単元が未登録です</p>`;
+                    } else {
+                        subs.forEach(sid => {
+                            html += `
+                                <div class="flex items-center justify-between text-[11px] bg-white p-2 rounded-lg border border-slate-200/60 shadow-3xs hover:border-slate-300 transition-all">
+                                    <span class="text-slate-700 font-medium truncate"><i class="fa-solid fa-square-share-nodes text-indigo-400 mr-1.5"></i>${categories[sid].name}</span>
+                                    <div class="flex items-center gap-2 shrink-0 ml-2">
+                                        <span class="text-[9px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded select-all" title="CSVで使用する小単元ID（クリック選択対応）">${sid}</span>
+                                        <button onclick="archiveCategoryNode('${sid}')" class="text-slate-300 hover:text-amber-500 transition-all" title="アーカイブ"><i class="fa-solid fa-box-archive"></i></button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+                    
+                    html += `
+                            </div>
+                            
+                            <div class="pt-1 flex gap-1.5">
+                                <input type="text" id="sub-category-input-${rid}" placeholder="この大単元に小単元を追加" class="flex-1 px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <button onclick="executeSubCategoryRegistration('${rid}')" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[11px] shadow-2xs whitespace-nowrap"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            }
+
+            renderCategoryArchiveManager();
+        }
+
+        // アーカイブ済み単元一覧（復元・完全削除）
+        function renderCategoryArchiveManager() {
+            const container = document.getElementById('category-archive-manager');
+            if(!container) return;
+            const archivedIds = Object.keys(categories).filter(id => categories[id].archived);
+            if(archivedIds.length === 0) {
+                container.innerHTML = `<p class="text-[11px] text-slate-400">アーカイブ済みの単元はありません。</p>`;
+                return;
+            }
+            container.innerHTML = archivedIds.map(id => {
+                const cat = categories[id];
+                const label = cat.parentId === 'root' ? "大単元" : "小単元";
+                return `
+                    <div class="flex items-center justify-between text-[11px] bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                        <span class="text-amber-900 font-medium truncate"><span class="text-[9px] bg-amber-100 px-1.5 py-0.5 rounded mr-1.5">${label}</span>${cat.name}</span>
+                        <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                            <button onclick="restoreCategoryNode('${id}')" class="px-2 py-1 bg-white border border-amber-300 text-amber-700 rounded-md font-bold hover:bg-amber-100 transition-all"><i class="fa-solid fa-rotate-left mr-1"></i>復元</button>
+                            <button onclick="purgeCategoryNode('${id}')" class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md font-bold transition-all"><i class="fa-solid fa-trash-can mr-1"></i>完全削除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleCategoryArchivePanel() {
+            isCategoryArchivePanelOpen = !isCategoryArchivePanelOpen;
+            document.getElementById('category-archive-manager').classList.toggle('hidden', !isCategoryArchivePanelOpen);
+            document.getElementById('category-archive-toggle-icon').className = isCategoryArchivePanelOpen
+                ? "fa-solid fa-chevron-down mr-1.5 text-[9px]"
+                : "fa-solid fa-chevron-right mr-1.5 text-[9px]";
+        }
+
+        // --- 教員：問題バリエーションプールの管理 ---
+        // フェーズ4：出題形式に応じて入力フィールドの表示を切り替える
+        function toggleProblemTypeFields(type) {
+            ['choice', 'numeric', 'expression', 'drawing'].forEach(t => {
+                const el = document.getElementById(`problem-type-fields-${t}`);
+                if (el) el.classList.toggle('hidden', t !== type);
+            });
+        }
+
+        function executeManualProblemAddition() {
+            const categoryId = document.getElementById('problem-category-select').value;
+            const level = parseInt(document.getElementById('problem-level-select').value);
+            const type = document.getElementById('problem-type-select').value;
+            const question = document.getElementById('problem-question-input').value.trim();
+
+            if(!categoryId) { alert("所属小単元を選択してください。"); return; }
+            if(!question) { alert("問題本文を入力してください。"); return; }
+
+            const id = 'p-' + Date.now();
+            let newProblem = { id, categoryId, level, type, question };
+
+            if (type === 'choice') {
+                const choices = [];
+                for(let i=0; i<4; i++) {
+                    const val = document.getElementById(`choice-${i}`).value.trim();
+                    choices.push(val || `選択肢 ${i+1}`);
+                }
+                const correct = parseInt(document.getElementById('problem-correct-select').value);
+                newProblem.choices = choices;
+                newProblem.correct = correct;
+            } else if (type === 'numeric') {
+                const answer = document.getElementById('numeric-answer-input').value.trim();
+                const tolerance = document.getElementById('numeric-tolerance-input').value.trim();
+                if (!answer) { alert("正解の数値を入力してください。"); return; }
+                newProblem.numericAnswer = answer;
+                newProblem.numericTolerance = tolerance ? parseFloat(tolerance) : 0;
+            } else if (type === 'expression') {
+                const raw = document.getElementById('expression-answers-input').value.trim();
+                if (!raw) { alert("許容する記述解答を少なくとも1つ入力してください。"); return; }
+                newProblem.acceptedExpressions = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+            } else if (type === 'drawing') {
+                const hint = document.getElementById('drawing-answer-hint-input').value.trim();
+                if (!hint) { alert("模範解答の説明・採点基準を入力してください。"); return; }
+                newProblem.drawingAnswerHint = hint;
+            }
+
+            problems[id] = newProblem;
+
+            // バッファクリア
+            document.getElementById('problem-question-input').value = "";
+            for(let i=0; i<4; i++) { const el = document.getElementById(`choice-${i}`); if(el) el.value = ""; }
+            const clearIds = ['numeric-answer-input', 'numeric-tolerance-input', 'expression-answers-input', 'drawing-answer-hint-input'];
+            clearIds.forEach(cid => { const el = document.getElementById(cid); if(el) el.value = ""; });
+
+            commitCloudSync('problems', problems);
+            alert("問題プールに新バリエーションが正常に追加されました。");
+        }
+
+        // --- CSVファイルを解析・Firebaseへ直接自動コミット ---
+        function executeCSVImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split(/\r?\n/);
+                if (lines.length <= 1) {
+                    alert("CSVファイル内に有効なデータ行が存在しません。");
+                    return;
+                }
+
+                let importCount = 0;
+                let errorCount = 0;
+
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+
+                    const columns = parseQuotedCSVLine(line);
+
+                    if (columns.length < 8) {
+                        errorCount++;
+                        continue;
+                    }
+
+                    const categoryId = columns[0].trim();
+                    const level = parseInt(columns[1].trim());
+                    const question = columns[2].trim();
+                    const choices = [
+                        columns[3].trim(),
+                        columns[4].trim(),
+                        columns[5].trim(),
+                        columns[6].trim()
+                    ];
+                    const correct = parseInt(columns[7].trim());
+
+                    if (!categoryId || isNaN(level) || !question || isNaN(correct) || correct < 0 || correct > 3) {
+                        errorCount++;
+                        continue;
+                    }
+
+                    const uniqueProblemId = 'p-csv-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+                    problems[uniqueProblemId] = {
+                        id: uniqueProblemId,
+                        categoryId,
+                        level,
+                        question,
+                        choices,
+                        correct
+                    };
+                    importCount++;
+                }
+
+                if (importCount > 0) {
+                    commitCloudSync('problems', problems);
+                    alert(`CSVから計 ${importCount} 問の問題を正常に読み込み、データベースへの同期保存を完了しました！\n（スキップ・不正行: ${errorCount}件）`);
+                } else {
+                    alert("インポートに失敗しました。構造構成を確認してください。");
+                }
+                event.target.value = '';
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        function parseQuotedCSVLine(line) {
+            const result = [];
+            let currentField = '';
+            let insideQuotes = false;
+
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    if (insideQuotes && line[i+1] === '"') {
+                        currentField += '"';
+                        i++;
+                    } else {
+                        insideQuotes = !insideQuotes;
+                    }
+                } else if (char === ',' && !insideQuotes) {
+                    result.push(currentField);
+                    currentField = '';
+                } else {
+                    currentField += char;
+                }
+            }
+            result.push(currentField);
+            return result;
+        }
+
+        // ============================================================
+        // フェーズ3：教員間での問題プール共有・テンプレート化
+        // ============================================================
+        function exportCategoryAsTemplate() {
+            const catId = document.getElementById('template-export-category-select').value;
+            const name = document.getElementById('template-export-name-input').value.trim();
+            if (!catId || !categories[catId]) { alert("書き出す小単元を選択してください。"); return; }
+            if (!name) { alert("テンプレート名を入力してください。"); return; }
+
+            const relatedProblems = Object.values(problems).filter(p => p.categoryId === catId);
+            if (relatedProblems.length === 0) { alert("この小単元にはまだ問題が登録されていません。"); return; }
+
+            const templateId = 'tpl-' + Date.now();
+            sharedTemplates[templateId] = {
+                id: templateId,
+                name,
+                sourceClassName: (currentClassId && classes[currentClassId]) ? classes[currentClassId].name : "(不明なクラス)",
+                sourceCategoryName: categories[catId].name,
+                createdAt: Date.now(),
+                // idはインポート先での再採番に委ねるため保持しない
+                problems: relatedProblems.map(p => { const { id, ...rest } = p; return rest; })
+            };
+            commitCloudSync('sharedTemplates', sharedTemplates);
+            document.getElementById('template-export-name-input').value = "";
+            alert(`テンプレート「${name}」（${relatedProblems.length}問）を共有ライブラリへ登録しました。`);
+        }
+
+        function renderSharedTemplateLibrary() {
+            const list = document.getElementById('shared-template-library-list');
+            if (!list) return;
+            const ids = Object.keys(sharedTemplates);
+            if (ids.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400 col-span-full">共有されているテンプレートはまだありません。</p>`;
+                return;
+            }
+            list.innerHTML = ids.map(id => {
+                const t = sharedTemplates[id];
+                return `
+                    <div class="p-3 bg-violet-50 border border-violet-200 rounded-xl space-y-1.5 text-xs">
+                        <p class="font-bold text-violet-900 truncate">${t.name}</p>
+                        <p class="text-[10px] text-violet-500">元: ${t.sourceClassName} ／ ${t.sourceCategoryName}（${(t.problems || []).length}問）</p>
+                        <div class="flex items-center justify-between gap-2 pt-1">
+                            <button onclick="importSharedTemplate('${id}')" class="flex-1 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-lg text-[10px] transition-all"><i class="fa-solid fa-download mr-1"></i>現在のクラスへインポート</button>
+                            <button onclick="deleteSharedTemplate('${id}')" class="text-violet-300 hover:text-rose-500 transition-all" title="共有ライブラリから削除"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function importSharedTemplate(templateId) {
+            if (!currentClassId) { alert("インポート先のクラスが選択されていません。"); return; }
+            const t = sharedTemplates[templateId];
+            if (!t) return;
+            if (!confirm(`テンプレート「${t.name}」（${(t.problems || []).length}問）を現在のクラス「${classes[currentClassId].name}」にインポートします。よろしいですか？`)) return;
+
+            // 既存構造との衝突を避けるため「共有インポート」という大単元配下にテンプレート名で小単元を新設する
+            let importRootId = Object.keys(categories).find(id => categories[id].parentId === 'root' && categories[id].name === '共有インポート' && !categories[id].archived);
+            if (!importRootId) {
+                importRootId = 'cat-root-import-' + Date.now();
+                categories[importRootId] = { id: importRootId, name: '共有インポート', parentId: 'root', archived: false };
+            }
+            const newSubId = 'cat-sub-' + Date.now();
+            categories[newSubId] = { id: newSubId, name: t.name, parentId: importRootId, archived: false };
+
+            (t.problems || []).forEach((p, idx) => {
+                const newId = 'p-import-' + Date.now() + '-' + idx;
+                problems[newId] = { ...p, id: newId, categoryId: newSubId };
+            });
+
+            commitCloudSync('categories', categories);
+            commitCloudSync('problems', problems);
+            alert("インポートが完了しました。「単元・問題」タブの大単元「共有インポート」に追加されています。");
+        }
+
+        function deleteSharedTemplate(templateId) {
+            if (!confirm("この共有テンプレートをライブラリから削除しますか？（既にインポート済みのクラスのデータには影響しません）")) return;
+            delete sharedTemplates[templateId];
+            commitCloudSync('sharedTemplates', sharedTemplates);
+        }
+
+        // ============================================================
+        // フェーズ4：PDF / Word からの問題自動抽出インポート（ベータ・ルールベース抽出）
+        // ============================================================
+        // ブラウザ内でPDF/Wordのテキストのみを抽出し、正規表現パターンで問題候補へ変換する。
+        // 自由記述の完全な自動解釈にはAIによる文脈理解が必要になるため、
+        // ここでは「①②③④」等の定型パターンに絞った抽出とし、必ず登録前のプレビュー確認を挟む。
+        async function extractProblemsFromDocument() {
+            const fileInput = document.getElementById('doc-import-file-input');
+            const statusEl = document.getElementById('doc-import-status');
+            const file = fileInput.files[0];
+            if (!file) { alert("PDFまたはWord（.docx）ファイルを選択してください。"); return; }
+
+            statusEl.innerText = "テキストを抽出しています…";
+            document.getElementById('doc-import-preview-container').innerHTML = "";
+            document.getElementById('doc-import-commit-zone').classList.add('hidden');
+
+            try {
+                let text = "";
+                const lowerName = file.name.toLowerCase();
+                if (lowerName.endsWith('.pdf')) {
+                    text = await extractTextFromPdfFile(file);
+                } else if (lowerName.endsWith('.docx')) {
+                    text = await extractTextFromDocxFile(file);
+                } else {
+                    alert("対応形式は PDF（.pdf）または Word（.docx）です。");
+                    statusEl.innerText = "";
+                    return;
+                }
+
+                const candidates = parseQuestionsFromExtractedText(text);
+                extractedProblemCandidates = candidates;
+
+                if (candidates.length === 0) {
+                    statusEl.innerText = "問題として認識できるパターンが見つかりませんでした。「①②③④」形式の選択肢と「正解：②」のような表記があるかご確認ください。";
+                    return;
+                }
+
+                statusEl.innerText = `${candidates.length} 件の問題候補を検出しました。内容を確認・修正してから一括登録してください。`;
+                renderExtractedProblemPreview(candidates);
+                document.getElementById('doc-import-commit-zone').classList.remove('hidden');
+            } catch (e) {
+                console.error(e);
+                statusEl.innerText = "抽出中にエラーが発生しました。ファイル形式やサイズをご確認のうえ、再度お試しください。";
+            }
+        }
+
+        function extractTextFromPdfFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    try {
+                        if (window.pdfjsLib) {
+                            pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+                        }
+                        const pdf = await pdfjsLib.getDocument({ data: reader.result }).promise;
+                        let fullText = "";
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const content = await page.getTextContent();
+                            fullText += content.items.map(it => it.str).join(" ") + "\n";
+                        }
+                        resolve(fullText);
+                    } catch (e) { reject(e); }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function extractTextFromDocxFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    try {
+                        const result = await mammoth.extractRawText({ arrayBuffer: reader.result });
+                        resolve(result.value);
+                    } catch (e) { reject(e); }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // 「問1．本文①…②…③…④…正解：②」のような定型パターンを問題候補として抽出する簡易パーサ
+        function parseQuestionsFromExtractedText(text) {
+            const normalized = String(text).replace(/\r/g, '');
+            const blocks = normalized.split(/(?=(?:問\s*\d+|Ｑ\s*\d+|Q\s*\d+)\s*[\.\．\)：:]?\s)/g);
+            const circled = ['①', '②', '③', '④'];
+            const candidates = [];
+
+            blocks.forEach(block => {
+                const trimmed = block.trim();
+                if (!trimmed) return;
+
+                const choiceRegex = /[①②③④]\s*([^①②③④\n]+)/g;
+                let m, choices = [];
+                while ((m = choiceRegex.exec(trimmed)) !== null) {
+                    choices.push(m[1].replace(/(?:正解|解答|答え)[\s:：].*$/, '').trim());
+                }
+                if (choices.length < 4) return; // 4択として認識できないブロックはスキップ
+
+                const firstMarkerIdx = trimmed.search(/[①②③④]/);
+                const questionText = trimmed.slice(0, firstMarkerIdx)
+                    .replace(/^(?:問\s*\d+|Ｑ\s*\d+|Q\s*\d+)\s*[\.\．\)：:]?\s*/, '')
+                    .trim();
+                if (!questionText) return;
+
+                const answerMatch = trimmed.match(/(?:正解|解答|答え)[\s:：]*([①②③④1234])/);
+                let correctIndex = null;
+                if (answerMatch) {
+                    const marker = answerMatch[1];
+                    const circledIdx = circled.indexOf(marker);
+                    correctIndex = circledIdx >= 0 ? circledIdx : (parseInt(marker) - 1);
+                }
+
+                candidates.push({
+                    question: questionText,
+                    choices: choices.slice(0, 4),
+                    correct: (correctIndex !== null && correctIndex >= 0 && correctIndex <= 3) ? correctIndex : null
+                });
+            });
+
+            return candidates;
+        }
+
+        function escapeHtmlForInput(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderExtractedProblemPreview(candidates) {
+            const container = document.getElementById('doc-import-preview-container');
+            container.innerHTML = candidates.map((c, idx) => `
+                <div class="border border-sky-200 bg-sky-50 rounded-xl p-3 space-y-2" data-candidate-idx="${idx}">
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center gap-1.5 text-[11px] font-bold text-sky-800">
+                            <input type="checkbox" class="candidate-include-checkbox" checked> 候補 ${idx + 1} を登録する
+                        </label>
+                        ${c.correct === null ? '<span class="text-[10px] text-rose-500 font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>正解未検出・要確認</span>' : ''}
+                    </div>
+                    <textarea class="candidate-question-field w-full px-2 py-1.5 text-[11px] border border-sky-200 rounded-lg bg-white" rows="2">${escapeHtmlForInput(c.question)}</textarea>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        ${[0,1,2,3].map(i => `<input type="text" class="candidate-choice-field-${i} px-2 py-1 text-[11px] border border-sky-200 rounded-lg bg-white" value="${escapeHtmlForInput(c.choices[i] || '')}">`).join('')}
+                    </div>
+                    <select class="candidate-correct-field px-2 py-1 text-[11px] border border-sky-200 rounded-lg bg-white">
+                        ${[0,1,2,3].map(i => `<option value="${i}" ${c.correct === i ? 'selected' : ''}>選択肢 ${i+1} が正解</option>`).join('')}
+                    </select>
+                </div>
+            `).join('');
+        }
+
+        function commitExtractedProblems() {
+            const categoryId = document.getElementById('doc-import-category-select').value;
+            const level = parseInt(document.getElementById('doc-import-level-select').value);
+            if (!categoryId) { alert("登録先の小単元を選択してください。"); return; }
+
+            const blocks = document.querySelectorAll('#doc-import-preview-container [data-candidate-idx]');
+            let count = 0;
+            blocks.forEach((block, idx) => {
+                const include = block.querySelector('.candidate-include-checkbox').checked;
+                if (!include) return;
+                const question = block.querySelector('.candidate-question-field').value.trim();
+                const choices = [0,1,2,3].map(i => block.querySelector(`.candidate-choice-field-${i}`).value.trim());
+                const correct = parseInt(block.querySelector('.candidate-correct-field').value);
+                if (!question || choices.some(c => !c)) return;
+
+                const id = 'p-doc-' + Date.now() + '-' + idx;
+                problems[id] = { id, categoryId, level, type: 'choice', question, choices, correct };
+                count++;
+            });
+
+            if (count === 0) { alert("登録可能な候補がありませんでした。内容をご確認ください。"); return; }
+
+            commitCloudSync('problems', problems);
+            alert(`${count} 件の問題を問題プールへ登録しました。`);
+            document.getElementById('doc-import-preview-container').innerHTML = "";
+            document.getElementById('doc-import-commit-zone').classList.add('hidden');
+            document.getElementById('doc-import-status').innerText = "";
+            document.getElementById('doc-import-file-input').value = "";
+            extractedProblemCandidates = [];
+        }
+
+        function renderProblemsMatrixPreview() {
+            const container = document.getElementById('problems-matrix-preview-container');
+            if(!container) return;
+
+            const subCategoryIds = Object.keys(categories).filter(id => categories[id].parentId !== 'root' && !categories[id].archived);
+            if(subCategoryIds.length === 0) {
+                container.innerHTML = `<p class="text-xs text-slate-400">小単元カテゴリが未構築です。</p>`;
+                return;
+            }
+
+            let html = `
+                <div class="overflow-x-auto rounded-xl border border-slate-200">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
+                                <th class="p-2.5">小単元名</th>
+                                <th class="p-2.5 border-l border-slate-200 text-center w-28">Level 1 (基礎)</th>
+                                <th class="p-2.5 border-l border-slate-200 text-center w-28">Level 2 (標準)</th>
+                                <th class="p-2.5 border-l border-slate-200 text-center w-28">Level 3 (応用)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            subCategoryIds.forEach(catId => {
+                html += `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50/60 font-medium text-slate-800">
+                        <td class="p-2.5 font-bold">${categories[catId].name}</td>
+                `;
+
+                for(let lvl=1; lvl<=3; lvl++) {
+                    const pool = Object.values(problems).filter(p => p.categoryId === catId && p.level === lvl);
+                    let badgeColor = pool.length > 0 ? "bg-indigo-50 text-indigo-700 border-indigo-100" : "bg-rose-50 text-rose-600 border-rose-100";
+                    html += `
+                        <td class="p-2.5 border-l border-slate-100 text-center">
+                            <span class="inline-block px-2 py-0.5 rounded-md border ${badgeColor} font-bold text-[11px]">
+                                ${pool.length} 問
+                            </span>
+                        </td>
+                    `;
+                }
+                html += `</tr>`;
+            });
+
+            html += `</tbody></table></div>`;
+            container.innerHTML = html;
+        }
+
+        // --- ② 生徒：ログイン用ドロップダウンセレクター同期（非同期バグ改善） ---
+        function renderStudentLoginSelector() {
+            const select = document.getElementById('student-selector-dropdown');
+            if(!select) return;
+            const arr = Object.values(students).filter(s => !s.archived);
+            if(arr.length === 0) {
+                select.innerHTML = `<option value="">名簿マネージャーで生徒を追加してください</option>`;
+                return;
+            }
+            
+            // 出席番号の数値順に綺麗に並び替えて反映
+            arr.sort((a,b) => Number(a.num || 0) - Number(b.num || 0));
+
+            select.innerHTML = arr.map(s => `
+                <option value="${s.id}">No.${s.num || '-'} ➔ ${s.name}</option>
+            `).join('');
+        }
+
+        // --- ② 生徒：パスワード付きセキュアログイン処理（ハッシュ照合） ---
+        async function executeStudentLogin() {
+            const id = document.getElementById('student-selector-dropdown').value;
+            const enteredPass = document.getElementById('student-login-pass-input').value.trim();
+
+            if(!id || !students[id]) {
+                alert("アカウントが存在しないか選択されていません。");
+                return;
+            }
+
+            const targetStudent = students[id];
+
+            if (targetStudent.archived) {
+                alert("このアカウントは現在アーカイブ（無効化）されています。教員に確認してください。");
+                return;
+            }
+
+            // パスワード認証検証（ハッシュ照合）
+            if (targetStudent.passHash) {
+                const ok = await verifyPassword(enteredPass, targetStudent.passSalt || "", targetStudent.passHash);
+                if (!ok) {
+                    alert("パスワードが一致しません。もう一度確認してください。");
+                    return;
+                }
+            }
+
+            currentStudent = targetStudent;
+            document.getElementById('student-login-pass-input').value = ""; // 入力バッファクリア
+
+            document.getElementById('student-stage-login').classList.add('hidden');
+            document.getElementById('student-workspace').classList.remove('hidden');
+            
+            document.getElementById('student-profile-name').innerText = `No.${currentStudent.num || '-'} ${currentStudent.name}`;
+            currentUnitCategory = null;
+            currentActiveProblem = null;
+
+            document.getElementById('student-stage-nav').classList.remove('hidden');
+            document.getElementById('student-stage-play').classList.add('hidden');
+            document.getElementById('student-history-panel').classList.add('hidden');
+            document.getElementById('problem-empty-placeholder').classList.remove('hidden');
+
+            renderStudentUnitSelector();
+        }
+
+        function executeStudentLogoutSequence() {
+            currentStudent = null;
+            currentUnitCategory = null;
+            currentActiveProblem = null;
+            document.getElementById('student-stage-login').classList.remove('hidden');
+            document.getElementById('student-workspace').classList.add('hidden');
+        }
+
+        function renderStudentUnitSelector() {
+            const list = document.getElementById('student-unit-category-list');
+            if(!list) return;
+
+            const subCategoryIds = Object.keys(categories).filter(id => categories[id].parentId !== 'root' && !categories[id].archived);
+            if(subCategoryIds.length === 0) {
+                list.innerHTML = `<p class="text-[11px] text-slate-400">現在提示できる単元がありません。</p>`;
+                return;
+            }
+
+            list.innerHTML = subCategoryIds.map(catId => {
+                const sub = categories[catId];
+                const key = `${currentStudent.id}_${catId}`;
+                const prog = progress[key] || { currentLevel: 1 };
+                const activeStyle = (currentUnitCategory && currentUnitCategory.id === catId) 
+                    ? "bg-indigo-50 border-indigo-200 text-indigo-700" 
+                    : "bg-slate-50 border-slate-200/60 hover:bg-slate-100/70 text-slate-700";
+
+                return `
+                    <button onclick="selectStudentUnitCategory('${catId}')" class="w-full text-left p-3 border rounded-xl font-bold text-xs flex items-center justify-between transition-all ${activeStyle}">
+                        <span class="truncate"><i class="fa-solid fa-circle-play mr-2 text-slate-400"></i>${sub.name}</span>
+                        <span class="px-2 py-0.5 bg-white border border-slate-200 rounded-md shadow-2xs font-bold text-[10px] text-indigo-600 whitespace-nowrap ml-1">Lvl ${prog.currentLevel}</span>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        // --- 生徒：コア・アダプティブ出題推論エンジン ---
+        function selectStudentUnitCategory(catId) {
+            if(!categories[catId] || categories[catId].archived) return;
+            currentUnitCategory = categories[catId];
+            
+            document.getElementById('problem-empty-placeholder').classList.add('hidden');
+            document.getElementById('student-stage-play').classList.remove('hidden');
+            document.getElementById('student-history-panel').classList.remove('hidden');
+
+            document.getElementById('student-active-unit-badge').innerText = categories[currentUnitCategory.parentId] ? categories[currentUnitCategory.parentId].name : "大単元";
+            document.getElementById('student-active-unit-title').innerText = currentUnitCategory.name;
+
+            hideImmediateFeedbackBanner();
+            renderAdaptiveProblem();
+            renderStudentUnitSelector();
+            renderMasteryHistoryPanel();
+        }
+
+        function renderAdaptiveProblem() {
+            const renderZone = document.getElementById('student-question-render-zone');
+            const choicesContainer = document.getElementById('student-choices-container');
+            const levelIndicator = document.getElementById('student-current-level-indicator');
+
+            const key = `${currentStudent.id}_${currentUnitCategory.id}`;
+            const prog = progress[key] || makeDefaultProgress();
+            
+            levelIndicator.innerText = `Level ${prog.currentLevel}`;
+            updateMasteryScoreBar(prog.masteryScore);
+
+            let pool = Object.values(problems).filter(p => p.categoryId === currentUnitCategory.id && p.level === prog.currentLevel);
+
+            if (pool.length === 0) {
+                let backupPool = Object.values(problems).filter(p => p.categoryId === currentUnitCategory.id);
+                if(backupPool.length === 0) {
+                    renderZone.innerHTML = `
+                        <div class="w-full text-center py-4 space-y-1">
+                            <h4 class="text-xs font-bold text-slate-500">問題が登録されていません</h4>
+                            <p class="text-[11px] text-slate-400">管理画面の「アダプティブ問題エディタ」から、この小単元（${currentUnitCategory.name}）の問題を登録してください。</p>
+                        </div>
+                    `;
+                    choicesContainer.innerHTML = "";
+                    return;
+                }
+                currentActiveProblem = backupPool[Math.floor(Math.random() * backupPool.length)];
+            } else {
+                currentActiveProblem = pool[Math.floor(Math.random() * pool.length)];
+            }
+
+            renderZone.innerHTML = `<div>${currentActiveProblem.question}</div>`;
+
+            renderAnswerInputArea(currentActiveProblem);
+
+            // フェーズ2：解答スピードをスコアに反映するため、出題時刻を記録
+            currentQuestionStartedAt = Date.now();
+
+            triggerMathRendering();
+        }
+
+        // ============================================================
+        // フェーズ4：出題形式の拡張（4択／数値解答／途中式・記述／図形描画）
+        // ============================================================
+        function renderAnswerInputArea(problem) {
+            const choicesContainer = document.getElementById('student-choices-container');
+            const type = problem.type || 'choice'; // 未指定（旧データ・CSV由来）は4択として扱う
+
+            if (type === 'numeric') {
+                choicesContainer.innerHTML = `
+                    <div class="sm:col-span-2 flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="numeric-answer-field" placeholder="数値を入力（例：0.5、1/2 など）" class="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button onclick="submitNumericAnswerHandler()" class="student-choice-btn px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all whitespace-nowrap">解答する</button>
+                    </div>
+                `;
+            } else if (type === 'expression') {
+                choicesContainer.innerHTML = `
+                    <div class="sm:col-span-2 space-y-2">
+                        <textarea id="expression-answer-field" rows="2" placeholder="途中式・答えを入力してください" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                        <button onclick="submitExpressionAnswerHandler()" class="student-choice-btn w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all">解答する</button>
+                    </div>
+                `;
+            } else if (type === 'drawing') {
+                choicesContainer.innerHTML = `
+                    <div class="sm:col-span-2 space-y-2">
+                        <canvas id="drawing-canvas" width="500" height="220" class="w-full bg-white border border-slate-300 rounded-xl touch-none" style="cursor:crosshair;"></canvas>
+                        <div class="flex items-center justify-between gap-2">
+                            <button onclick="clearDrawingCanvas()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg text-[11px] transition-all"><i class="fa-solid fa-eraser mr-1"></i>消す</button>
+                            <button onclick="revealDrawingAnswer()" class="student-choice-btn px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all">描き終えたら模範解答を見る</button>
+                        </div>
+                        <div id="drawing-answer-reveal" class="hidden p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                            <p class="text-[11px] text-amber-800"><span class="font-bold">採点基準：</span>${problem.drawingAnswerHint || ''}</p>
+                            <div class="flex gap-2">
+                                <button onclick="submitDrawingSelfAssessment(true)" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px]">自己採点：正解だった</button>
+                                <button onclick="submitDrawingSelfAssessment(false)" class="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[11px]">自己採点：不正解だった</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                initDrawingCanvas();
+            } else {
+                const choices = problem.choices || [];
+                choicesContainer.innerHTML = choices.map((choice, idx) => `
+                    <button onclick="submitStudentAnswer(${idx})" class="student-choice-btn w-full text-left p-3.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 font-bold text-xs rounded-xl transition-all flex items-center gap-3">
+                        <span class="w-5 h-5 bg-white border border-slate-300 text-slate-400 text-[10px] rounded-md flex items-center justify-center font-bold shadow-2xs">${idx+1}</span>
+                        <span class="text-slate-700">${choice}</span>
+                    </button>
+                `).join('');
+            }
+        }
+
+        // --- 数値解答式：分数（1/2）にも対応した簡易パーサ ---
+        function parseFlexibleNumber(str) {
+            if (str === null || str === undefined) return null;
+            const s = String(str).trim();
+            if (s.includes('/')) {
+                const parts = s.split('/');
+                const n = parseFloat(parts[0]), d = parseFloat(parts[1]);
+                if (!isNaN(n) && !isNaN(d) && d !== 0) return n / d;
+                return null;
+            }
+            const v = parseFloat(s);
+            return isNaN(v) ? null : v;
+        }
+
+        function submitNumericAnswerHandler() {
+            const field = document.getElementById('numeric-answer-field');
+            const raw = field.value.trim();
+            if (!raw) { alert("数値を入力してください。"); return; }
+            const studentVal = parseFlexibleNumber(raw);
+            const correctVal = parseFlexibleNumber(currentActiveProblem.numericAnswer);
+            let isCorrect = false;
+            if (studentVal !== null && correctVal !== null) {
+                const tolerance = currentActiveProblem.numericTolerance || 1e-9;
+                isCorrect = Math.abs(studentVal - correctVal) <= tolerance;
+            }
+            finalizeAnswerSubmission(isCorrect);
+        }
+
+        // --- 途中式・記述式：空白／全角半角／上付き文字の表記ゆれを吸収して比較 ---
+        function normalizeExpressionText(s) {
+            return String(s)
+                .replace(/\s+/g, '')
+                .replace(/[²]/g, '^2').replace(/[³]/g, '^3')
+                .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+                .toLowerCase();
+        }
+
+        function submitExpressionAnswerHandler() {
+            const field = document.getElementById('expression-answer-field');
+            const raw = field.value.trim();
+            if (!raw) { alert("解答を入力してください。"); return; }
+            const normalizedInput = normalizeExpressionText(raw);
+            const accepted = currentActiveProblem.acceptedExpressions || [];
+            const isCorrect = accepted.some(a => normalizeExpressionText(a) === normalizedInput);
+            finalizeAnswerSubmission(isCorrect);
+        }
+
+        // --- 図形描画：自動採点ができないため、簡易キャンバスでの自己採点方式を採用 ---
+        let drawingCanvasCtx = null;
+        function initDrawingCanvas() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (!canvas) return;
+            drawingCanvasCtx = canvas.getContext('2d');
+            drawingCanvasCtx.strokeStyle = '#4338ca';
+            drawingCanvasCtx.lineWidth = 2.5;
+            drawingCanvasCtx.lineCap = 'round';
+            let isDrawing = false;
+
+            const getPos = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: (clientX - rect.left) * (canvas.width / rect.width), y: (clientY - rect.top) * (canvas.height / rect.height) };
+            };
+            const start = (e) => { isDrawing = true; const p = getPos(e); drawingCanvasCtx.beginPath(); drawingCanvasCtx.moveTo(p.x, p.y); e.preventDefault(); };
+            const move = (e) => { if (!isDrawing) return; const p = getPos(e); drawingCanvasCtx.lineTo(p.x, p.y); drawingCanvasCtx.stroke(); e.preventDefault(); };
+            const end = () => { isDrawing = false; };
+
+            canvas.addEventListener('mousedown', start);
+            canvas.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', end);
+            canvas.addEventListener('touchstart', start, { passive: false });
+            canvas.addEventListener('touchmove', move, { passive: false });
+            canvas.addEventListener('touchend', end);
+        }
+
+        function clearDrawingCanvas() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (canvas && drawingCanvasCtx) drawingCanvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function revealDrawingAnswer() {
+            const reveal = document.getElementById('drawing-answer-reveal');
+            if (reveal) reveal.classList.remove('hidden');
+        }
+
+        function submitDrawingSelfAssessment(isCorrect) {
+            finalizeAnswerSubmission(isCorrect);
+        }
+
+        // 出題形式ごとに「正解」として表示するテキストを組み立てる
+        function buildCorrectAnswerDisplayText(problem) {
+            const type = problem.type || 'choice';
+            if (type === 'choice') return (problem.choices && problem.choices[problem.correct]) || '';
+            if (type === 'numeric') return problem.numericAnswer || '';
+            if (type === 'expression') return (problem.acceptedExpressions && problem.acceptedExpressions[0]) || '';
+            if (type === 'drawing') return problem.drawingAnswerHint || '';
+            return '';
+        }
+
+        function updateMasteryScoreBar(score) {
+            const bar = document.getElementById('student-mastery-score-bar');
+            const label = document.getElementById('student-mastery-score-label');
+            if (!bar || !label) return;
+            const safeScore = typeof score === 'number' ? Math.round(score) : 50;
+            bar.style.width = `${safeScore}%`;
+            bar.className = "h-full transition-all duration-500 " + (safeScore >= 66 ? "bg-emerald-500" : safeScore >= 33 ? "bg-indigo-500" : "bg-rose-500");
+            label.innerText = `${safeScore} / 100`;
+        }
+
+        // ============================================================
+        // フェーズ2：適応学習エンジンの高度化
+        // ・正誤だけでなく「解答スピード」を加味したスコアリングへ移行
+        // ・レベル切替にヒステリシスを設け、単発の正誤で乱高下しないようにする
+        // ・直近の解答履歴を保持し、生徒への可視化・教員への「つまずき検出」に活用する
+        // ============================================================
+        function makeDefaultProgress() {
+            return { currentLevel: 1, correctCount: 0, attemptCount: 0, masteryScore: 50, history: [] };
+        }
+
+        // 後方互換：v6.5〜v7時代の progress（masteryScore/history 未保持）を安全に補完する
+        function ensureProgressShape(prog) {
+            if (typeof prog.masteryScore !== 'number') {
+                // 旧レベルから概算スコアを逆算して初期化（急にリセットされた印象を与えないための配慮）
+                prog.masteryScore = Math.min(100, Math.max(0, (prog.currentLevel - 1) * 33 + 17));
+            }
+            if (!Array.isArray(prog.history)) prog.history = [];
+            return prog;
+        }
+
+        function updateMasteryOnAnswer(prog, isCorrect, responseTimeMs) {
+            ensureProgressShape(prog);
+
+            if (isCorrect) {
+                // 15秒未満での正解は「即答＝定着度が高い」とみなし加点を大きくする
+                const isFastAnswer = responseTimeMs < 15000;
+                prog.masteryScore = Math.min(100, prog.masteryScore + (isFastAnswer ? 9 : 5));
+            } else {
+                prog.masteryScore = Math.max(0, prog.masteryScore - 7);
+            }
+
+            // ヒステリシス付きレベル判定：閾値を高め（昇格）・低め（降格）に分けて頻繁な往復を防止
+            let leveledUp = false, leveledDown = false;
+            if (prog.currentLevel < 3 && prog.masteryScore >= 75) {
+                prog.currentLevel += 1;
+                leveledUp = true;
+            } else if (prog.currentLevel > 1 && prog.masteryScore <= 20) {
+                prog.currentLevel -= 1;
+                leveledDown = true;
+            }
+            // レベルが切り替わったら、新しいレベルでの習熟度をニュートラル（50）から再計測する
+            if (leveledUp || leveledDown) prog.masteryScore = 50;
+
+            prog.history.push({
+                ts: Date.now(),
+                correct: isCorrect,
+                level: prog.currentLevel,
+                responseTimeMs: responseTimeMs,
+                score: Math.round(prog.masteryScore)
+            });
+            // 履歴は直近20件のみ保持（データ肥大化防止）
+            if (prog.history.length > 20) prog.history.shift();
+
+            return { leveledUp, leveledDown };
+        }
+
+        // --- 生徒：回答判定 ＆ リアルタイム理解度更新ロジック（フェーズ2：スコアリング刷新／フェーズ4：形式非依存化） ---
+        // 4択選択式からの呼び出しエントリポイント（下位互換のため関数名を維持）
+        function submitStudentAnswer(selectedIndex) {
+            const isCorrect = (selectedIndex === currentActiveProblem.correct);
+            finalizeAnswerSubmission(isCorrect);
+        }
+
+        // すべての出題形式（4択／数値／記述／図形描画）が最終的に合流する判定共通処理
+        function finalizeAnswerSubmission(isCorrect) {
+            document.querySelectorAll('.student-choice-btn').forEach(btn => btn.disabled = true);
+
+            const key = `${currentStudent.id}_${currentUnitCategory.id}`;
+            if(!progress[key]) {
+                progress[key] = makeDefaultProgress();
+            }
+            const prog = progress[key];
+            prog.attemptCount += 1;
+
+            const responseTimeMs = currentQuestionStartedAt ? (Date.now() - currentQuestionStartedAt) : null;
+            const feedbackBanner = document.getElementById('immediate-feedback-banner');
+
+            const { leveledUp, leveledDown } = updateMasteryOnAnswer(prog, isCorrect, responseTimeMs);
+            const responseTimeText = responseTimeMs !== null ? `（解答時間 約${Math.round(responseTimeMs / 100) / 10}秒）` : "";
+            const levelChangeText = leveledUp ? "レベルアップしました！" : leveledDown ? "レベルを見直します。" : "";
+
+            if (isCorrect) {
+                prog.correctCount += 1;
+                feedbackBanner.className = "p-4 rounded-xl flex items-start gap-3 bg-emerald-50 border border-emerald-200 text-emerald-800";
+                feedbackBanner.innerHTML = `
+                    <div class="p-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs mt-0.5"><i class="fa-solid fa-circle-check"></i></div>
+                    <div>
+                        <h4 class="text-xs font-bold">正解です！ ${levelChangeText}</h4>
+                        <p class="text-[11px] text-emerald-600 mt-0.5">お見事。理解が深まっています。この調子で進みましょう。${responseTimeText}</p>
+                    </div>
+                `;
+            } else {
+                feedbackBanner.className = "p-4 rounded-xl flex items-start gap-3 bg-rose-50 border border-rose-200 text-rose-800";
+                const rightAnswerText = buildCorrectAnswerDisplayText(currentActiveProblem);
+                feedbackBanner.innerHTML = `
+                    <div class="p-1 bg-rose-100 text-rose-700 rounded-lg text-xs mt-0.5"><i class="fa-solid fa-circle-xmark"></i></div>
+                    <div>
+                        <h4 class="text-xs font-bold">不正解（次がんばろう！） ${levelChangeText}</h4>
+                        <p class="text-[11px] text-rose-600 mt-0.5">正解は 「<span class="font-bold">${rightAnswerText}</span>」 でした。定義や公式を見直してみましょう。${responseTimeText}</p>
+                    </div>
+                `;
+            }
+
+            feedbackBanner.classList.remove('hidden');
+            updateMasteryScoreBar(prog.masteryScore);
+            renderMasteryHistoryPanel();
+            triggerMathRendering();
+
+            commitCloudSync('progress', progress);
+
+            setTimeout(() => {
+                hideImmediateFeedbackBanner();
+                renderAdaptiveProblem();
+                renderStudentUnitSelector();
+            }, 1800);
+        }
+
+        // 学習履歴パネル：習熟度スコアのスパークライン＋直近の解答結果を表示
+        function renderMasteryHistoryPanel() {
+            const sparklineContainer = document.getElementById('student-mastery-sparkline');
+            const recentContainer = document.getElementById('student-recent-attempts');
+            if (!sparklineContainer || !recentContainer || !currentStudent || !currentUnitCategory) return;
+
+            const key = `${currentStudent.id}_${currentUnitCategory.id}`;
+            const prog = progress[key];
+            const history = (prog && Array.isArray(prog.history)) ? prog.history : [];
+
+            if (history.length === 0) {
+                sparklineContainer.innerHTML = `<p class="text-[11px] text-slate-400">まだ解答履歴がありません。問題に挑戦すると、ここに習熟度の推移が表示されます。</p>`;
+                recentContainer.innerHTML = "";
+                return;
+            }
+
+            sparklineContainer.innerHTML = buildSparklineSvg(history.map(h => h.score));
+
+            recentContainer.innerHTML = history.slice(-12).map(h => {
+                const icon = h.correct ? `<i class="fa-solid fa-check text-emerald-600"></i>` : `<i class="fa-solid fa-xmark text-rose-600"></i>`;
+                const bg = h.correct ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200";
+                const timeText = h.responseTimeMs != null ? `${Math.round(h.responseTimeMs / 100) / 10}s` : "-";
+                return `<span class="inline-flex items-center gap-1 px-2 py-1 border ${bg} rounded-lg text-[10px] font-bold text-slate-600" title="Lv${h.level} / ${timeText}">${icon}${timeText}</span>`;
+            }).join('');
+        }
+
+        // 外部ライブラリに依存しない軽量SVGスパークライン（6.1「単一HTML・軽量構成」の強みを維持するため自前実装）
+        function buildSparklineSvg(scores) {
+            const width = 100, height = 32, padding = 3;
+            const max = 100, min = 0;
+            const stepX = scores.length > 1 ? (width - padding * 2) / (scores.length - 1) : 0;
+            const points = scores.map((s, i) => {
+                const x = padding + i * stepX;
+                const y = height - padding - ((s - min) / (max - min)) * (height - padding * 2);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            });
+            const last = scores[scores.length - 1];
+            const lastColor = last >= 66 ? "#10b981" : last >= 33 ? "#6366f1" : "#f43f5e";
+            return `
+                <svg viewBox="0 0 ${width} ${height}" class="w-full h-10" preserveAspectRatio="none">
+                    <polyline points="${points.join(' ')}" fill="none" stroke="#c7d2fe" stroke-width="2" vector-effect="non-scaling-stroke" />
+                    <circle cx="${points[points.length-1].split(',')[0]}" cy="${points[points.length-1].split(',')[1]}" r="2.4" fill="${lastColor}" />
+                </svg>
+            `;
+        }
+
+        function hideImmediateFeedbackBanner() {
+            const banner = document.getElementById('immediate-feedback-banner');
+            if(banner) {
+                banner.classList.add('hidden');
+                banner.innerHTML = "";
+            }
+        }
+
+        // --- 全自動 KaTeX 数式レンダリングトリガー ---
+        function triggerMathRendering() {
+            setTimeout(() => {
+                if (window.renderMathInElement) {
+                    window.renderMathInElement(document.body, {
+                        delimiters: [
+                            {left: "$$", right: "$$", display: true},
+                            {left: "$", right: "$", display: false}
+                        ],
+                        throwOnError: false
+                    });
+                }
+            }, 30);
+        }
+
+        // --- 全体ルーティングシステム ---
+        window.switchTab = (id) => {
+            // 直接呼び出された場合でも管理者ロックを迂回できないよう二重に保証する
+            if ((id === 'teacher-dash-tab' || id === 'content-mgt-tab' || id === 'class-mgt-tab') && !isAdminUnlocked) {
+                pendingAdminTarget = id;
+                openAdminLockModal();
+                return;
+            }
+            document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+            document.getElementById(id).classList.add("active");
+            
+            document.querySelectorAll(".tab-btn").forEach(b => {
+                b.className = "tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-700 transition-all";
+            });
+            const btn = document.getElementById(`btn-${id}`);
+            if(btn) btn.className = "tab-btn flex-1 md:flex-none whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg bg-white text-indigo-700 shadow-sm transition-all";
+            
+            if (id === 'teacher-dash-tab') {
+                syncDashboardInterface();
+            }
+            if (id === 'content-mgt-tab') { 
+                updateParentCategorySelects(); 
+                renderCategoryHierarchy(); 
+                renderProblemsMatrixPreview();
+                renderSharedTemplateLibrary();
+            }
+            if (id === 'class-mgt-tab') {
+                renderClassManagementList();
+                renderClassContextSelector();
+            }
+            if (id === 'student-view-tab') {
+                renderStudentLoginSelector(); // タブ遷移時にも確実に同期リフレッシュ
+                if (currentStudent) {
+                    document.getElementById('student-stage-login').classList.add('hidden');
+                    if (currentUnitCategory) {
+                        document.getElementById('student-stage-nav').classList.remove('hidden');
+                        document.getElementById('student-stage-play').classList.remove('hidden');
+                        document.getElementById('problem-empty-placeholder').classList.add('hidden');
+                    } else {
+                        document.getElementById('student-stage-nav').classList.remove('hidden');
+                        document.getElementById('student-stage-play').classList.add('hidden');
+                        document.getElementById('problem-empty-placeholder').classList.remove('hidden');
+                    }
+                    renderStudentUnitSelector();
+                } else {
+                    executeStudentLogoutSequence();
+                }
+            }
+            triggerMathRendering();
+        };
+    </script>
+</body>
+</html>
